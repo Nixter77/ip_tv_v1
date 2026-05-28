@@ -182,6 +182,7 @@ public struct MainSplitView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Очистить поиск")
                 }
             }
             .padding(8)
@@ -209,8 +210,21 @@ public struct MainSplitView: View {
                 Spacer()
             } else if viewModel.filteredChannels.isEmpty {
                 Spacer()
-                Text("Каналы не найдены")
-                    .foregroundColor(.secondary)
+                VStack(spacing: 16) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 40))
+                        .foregroundColor(.secondary)
+                    Text("Каналы не найдены")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
+
+                    if !viewModel.searchQuery.isEmpty {
+                        Button("Очистить поиск") {
+                            viewModel.searchQuery = ""
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
                 Spacer()
             } else {
                 List(viewModel.filteredChannels, id: \.id, selection: $selectedChannel) { channel in
@@ -322,6 +336,7 @@ public struct MainSplitView: View {
                             .buttonStyle(.plain)
                             .padding(.trailing, 8)
                             .help("Смотреть в отдельном окне")
+                            .accessibilityLabel("Смотреть в отдельном окне")
                         }
                         
                         // Кнопка переключения полноэкранного режима
@@ -337,6 +352,7 @@ public struct MainSplitView: View {
                         .buttonStyle(.plain)
                         .padding(.trailing, 8)
                         .help("Во весь экран")
+                        .accessibilityLabel("Во весь экран")
                         
                         Button(action: {
                             viewModel.toggleFavorite(channelId: channel.id)
@@ -346,6 +362,7 @@ public struct MainSplitView: View {
                                 .foregroundColor(viewModel.favoriteIds.contains(channel.id) ? .pink : .secondary)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(viewModel.favoriteIds.contains(channel.id) ? "Удалить из избранного" : "Добавить в избранное")
                         .padding()
                     }
                     .padding()
@@ -443,6 +460,7 @@ struct ChannelRowView: View {
                 }
                 .buttonStyle(.plain)
                 .transition(.opacity)
+                .accessibilityLabel(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
             }
         }
         .padding(.vertical, 6)
