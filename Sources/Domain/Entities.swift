@@ -58,6 +58,28 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         return URL(string: urlString)
     }
 
+    /// URL string with masked sensitive information (credentials, query parameters) for UI display
+    public var maskedUrlString: String {
+        guard var components = URLComponents(string: urlString) else {
+            return urlString
+        }
+
+        // Mask user credentials
+        if components.user != nil || components.password != nil {
+            components.user = "****"
+            if components.password != nil {
+                components.password = "****"
+            }
+        }
+
+        // Mask query parameter values to protect session tokens/keys
+        if let queryItems = components.queryItems {
+            components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
+        }
+
+        return components.string ?? urlString
+    }
+
     enum CodingKeys: String, CodingKey {
         case channel
         case url
