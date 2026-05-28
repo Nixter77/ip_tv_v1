@@ -28,6 +28,8 @@ public protocol ChannelFilterEngineProtocol: Sendable {
 /// Высокопроизводительная реализация ChannelFilterEngine в виде Swift Actor.
 /// Использует инвертированные индексы на основе словарей, множеств и двоичного поиска для мгновенного выполнения запросов.
 public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
+    private static let invertedAlphanumerics = CharacterSet.alphanumerics.inverted
+
     // Первичные данные
     private var channels: [String: Channel] = [:]
     private var activeStreams: [String: [Stream]] = [:] // key: channelId
@@ -88,7 +90,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             
             // Токенизация названия для поиска (диакритика вырезается)
             let tokens = channel.name.foldedForSearch()
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .components(separatedBy: Self.invertedAlphanumerics)
                 .filter { !$0.isEmpty }
             for token in tokens {
                 self.channelIdsByNameToken[token, default: []].insert(channel.id)
@@ -175,7 +177,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         // 4. Текстовый поиск по токенам и префиксам с двоичным поиском
         if let query = query, !query.isEmpty {
             let queryTokens = query.foldedForSearch()
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .components(separatedBy: Self.invertedAlphanumerics)
                 .filter { !$0.isEmpty }
             
             var tokenIntersection: Set<String>? = nil
