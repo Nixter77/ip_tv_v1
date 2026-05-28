@@ -28,6 +28,9 @@ public protocol ChannelFilterEngineProtocol: Sendable {
 /// Высокопроизводительная реализация ChannelFilterEngine в виде Swift Actor.
 /// Использует инвертированные индексы на основе словарей, множеств и двоичного поиска для мгновенного выполнения запросов.
 public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
+    /// Кэшированный набор символов для токенизации (избегаем повторных аллокаций CharacterSet.alphanumerics.inverted)
+    private static let nonAlphanumerics = CharacterSet.alphanumerics.inverted
+
     // Первичные данные
     private var channels: [String: Channel] = [:]
     private var activeStreams: [String: [Stream]] = [:] // key: channelId
@@ -43,6 +46,9 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     // Отсортированный массив токенов для сверхбыстрого двоичного поиска по префиксу
     private var sortedTokens: [String] = []
     
+    // Предварительно отсортированный список всех активных каналов (для мгновенного возврата при отсутствии фильтров)
+    private var allChannelsSorted: [Channel] = []
+
     public init() {}
 
     /// Инициализация движка набором каналов и потоков и построение индексов в памяти
@@ -88,7 +94,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             
             // Токенизация названия для поиска (диакритика вырезается)
             let tokens = channel.name.foldedForSearch()
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .components(separatedBy: Self.nonAlphanumerics)
                 .filter { !$0.isEmpty }
             for token in tokens {
                 self.channelIdsByNameToken[token, default: []].insert(channel.id)
@@ -97,6 +103,9 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         
         // Сортируем токены один раз при старте для обеспечения O(log N) поиска
         self.sortedTokens = channelIdsByNameToken.keys.sorted()
+
+        // Кэшируем отсортированный список всех каналов
+        self.allChannelsSorted = self.channels.values.sorted { $0.name < $1.name }
     }
 
     /// Вспомогательный метод для двоичного поиска токенов с заданным префиксом.
@@ -141,6 +150,16 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         country: String?,
         language: String?
     ) async -> [Channel] {
+        // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
+        let hasFilters = (query != nil && !query!.isEmpty) ||
+                         (category != nil && !category!.isEmpty) ||
+                         (country != nil && !country!.isEmpty) ||
+                         (language != nil && !language!.isEmpty)
+
+        if !hasFilters {
+            return allChannelsSorted
+        }
+
         var resultSet: Set<String>? = nil
         
         let intersect: (Set<String>) -> Void = { set in
@@ -175,27 +194,31 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         // 4. Текстовый поиск по токенам и префиксам с двоичным поиском
         if let query = query, !query.isEmpty {
             let queryTokens = query.foldedForSearch()
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .components(separatedBy: Self.nonAlphanumerics)
                 .filter { !$0.isEmpty }
             
             var tokenIntersection: Set<String>? = nil
             for token in queryTokens {
-                var tokenSet = Set<String>()
+                var matchesForToken = Set<String>()
                 
                 // Используем сверхбыстрый двоичный поиск для префиксов
                 let matchingTokens = findTokens(startingWith: token)
-                var unionIds: [String] = []
                 for matchingToken in matchingTokens {
                     if let ids = channelIdsByNameToken[matchingToken] {
-                        unionIds.append(contentsOf: ids)
+                        // Оптимизация: используем formUnion для избежания промежуточных массивов
+                        matchesForToken.formUnion(ids)
                     }
                 }
-                tokenSet = Set(unionIds)
+
+                // Ранний выход, если по текущему токену ничего не найдено
+                if matchesForToken.isEmpty { return [] }
                 
                 if let current = tokenIntersection {
-                    tokenIntersection = current.intersection(tokenSet)
+                    tokenIntersection = current.intersection(matchesForToken)
+                    // Ранний выход, если пересечение стало пустым
+                    if tokenIntersection?.isEmpty == true { return [] }
                 } else {
-                    tokenIntersection = tokenSet
+                    tokenIntersection = matchesForToken
                 }
             }
             
