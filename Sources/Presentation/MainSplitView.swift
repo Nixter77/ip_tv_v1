@@ -157,7 +157,7 @@ public struct MainSplitView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
-                .help("⌘R")
+                .help("Обновить плейлист (⌘R)")
                 
                 Spacer()
             }
@@ -182,6 +182,7 @@ public struct MainSplitView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .help("Очистить поиск")
                     .accessibilityLabel("Очистить поиск")
                 }
             }
@@ -206,23 +207,55 @@ public struct MainSplitView: View {
                         .multilineTextAlignment(.center)
                         .foregroundColor(.secondary)
                         .padding(.horizontal)
+
+                    Button("Попробовать снова") {
+                        Task {
+                            await viewModel.reloadPlaylist()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 8)
                 }
                 Spacer()
             } else if viewModel.filteredChannels.isEmpty {
                 Spacer()
                 VStack(spacing: 16) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 40))
-                        .foregroundColor(.secondary)
-                    Text("Каналы не найдены")
-                        .font(.title3)
-                        .foregroundColor(.secondary)
-
-                    if !viewModel.searchQuery.isEmpty {
+                    if viewModel.selectedTab == .favorites {
+                        Image(systemName: "heart")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("В избранном пусто")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                        Button("Перейти ко всем каналам") {
+                            viewModel.selectedTab = .all
+                        }
+                        .buttonStyle(.bordered)
+                    } else if viewModel.selectedTab == .history {
+                        Image(systemName: "clock")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("История пуста")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                    } else if !viewModel.searchQuery.isEmpty {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("Ничего не найдено")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
                         Button("Очистить поиск") {
                             viewModel.searchQuery = ""
                         }
                         .buttonStyle(.bordered)
+                    } else {
+                        Image(systemName: "tv")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("Каналы не найдены")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
                     }
                 }
                 Spacer()
@@ -362,6 +395,7 @@ public struct MainSplitView: View {
                                 .foregroundColor(viewModel.favoriteIds.contains(channel.id) ? .pink : .secondary)
                         }
                         .buttonStyle(.plain)
+                        .help(viewModel.favoriteIds.contains(channel.id) ? "Удалить из избранного" : "Добавить в избранное")
                         .accessibilityLabel(viewModel.favoriteIds.contains(channel.id) ? "Удалить из избранного" : "Добавить в избранное")
                         .padding()
                     }
@@ -460,6 +494,7 @@ struct ChannelRowView: View {
                 }
                 .buttonStyle(.plain)
                 .transition(.opacity)
+                .help(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
                 .accessibilityLabel(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
             }
         }
