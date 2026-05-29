@@ -110,7 +110,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
 
     /// Вспомогательный метод для двоичного поиска токенов с заданным префиксом.
     /// Работает за O(log K) вместо O(K) линейного поиска.
-    private func findTokens(startingWith prefix: String) -> [String] {
+    private func findTokenRange(startingWith prefix: String) -> Range<Int>? {
         var low = 0
         var high = sortedTokens.count
         
@@ -123,18 +123,23 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             }
         }
         
-        var results: [String] = []
-        var index = low
-        while index < sortedTokens.count {
-            let token = sortedTokens[index]
-            if token.hasPrefix(prefix) {
-                results.append(token)
-                index += 1
+        let start = low
+        guard start < sortedTokens.count, sortedTokens[start].hasPrefix(prefix) else {
+            return nil
+        }
+
+        low = start
+        high = sortedTokens.count
+        while low < high {
+            let mid = (low + high) / 2
+            if sortedTokens[mid].hasPrefix(prefix) {
+                low = mid + 1
             } else {
-                break
+                high = mid
             }
         }
-        return results
+
+        return start..<low
     }
 
     /// Фильтрация с использованием предвычисленных индексов (< 50мс)
@@ -162,32 +167,33 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
 
         var resultSet: Set<String>? = nil
         
-        let intersect: (Set<String>) -> Void = { set in
-            if let current = resultSet {
-                resultSet = current.intersection(set)
-            } else {
-                resultSet = set
-            }
-        }
-        
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
-            let catSet = channelsByCategory[category.lowercased()] ?? []
-            intersect(catSet)
+            resultSet = channelsByCategory[category.lowercased()] ?? []
             if resultSet?.isEmpty == true { return [] }
         }
         
         // 2. Фильтр по стране
         if let country = country, !country.isEmpty {
             let countrySet = channelsByCountry[country.uppercased()] ?? []
-            intersect(countrySet)
+            if var current = resultSet {
+                current.formIntersection(countrySet)
+                resultSet = current
+            } else {
+                resultSet = countrySet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
         // 3. Фильтр по языку
         if let language = language, !language.isEmpty {
             let langSet = channelsByLanguage[language.lowercased()] ?? []
-            intersect(langSet)
+            if var current = resultSet {
+                current.formIntersection(langSet)
+                resultSet = current
+            } else {
+                resultSet = langSet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
@@ -202,19 +208,22 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                 var matchesForToken = Set<String>()
                 
                 // Используем сверхбыстрый двоичный поиск для префиксов
-                let matchingTokens = findTokens(startingWith: token)
-                for matchingToken in matchingTokens {
-                    if let ids = channelIdsByNameToken[matchingToken] {
-                        // Оптимизация: используем formUnion для избежания промежуточных массивов
-                        matchesForToken.formUnion(ids)
+                if let range = findTokenRange(startingWith: token) {
+                    for index in range {
+                        let matchingToken = sortedTokens[index]
+                        if let ids = channelIdsByNameToken[matchingToken] {
+                            // Оптимизация: используем formUnion для избежания промежуточных массивов
+                            matchesForToken.formUnion(ids)
+                        }
                     }
                 }
 
                 // Ранний выход, если по текущему токену ничего не найдено
                 if matchesForToken.isEmpty { return [] }
                 
-                if let current = tokenIntersection {
-                    tokenIntersection = current.intersection(matchesForToken)
+                if var current = tokenIntersection {
+                    current.formIntersection(matchesForToken)
+                    tokenIntersection = current
                     // Ранний выход, если пересечение стало пустым
                     if tokenIntersection?.isEmpty == true { return [] }
                 } else {
@@ -223,7 +232,12 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             }
             
             if let searchSet = tokenIntersection {
-                intersect(searchSet)
+                if var current = resultSet {
+                    current.formIntersection(searchSet)
+                    resultSet = current
+                } else {
+                    resultSet = searchSet
+                }
             } else {
                 return []
             }
@@ -231,10 +245,13 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         }
         
         // Если никакие фильтры не применялись
-        let finalIds = resultSet ?? Set(channels.keys)
+        guard let finalIds = resultSet else {
+            return allChannelsSorted
+        }
         
-        return finalIds.compactMap { channels[$0] }
-            .sorted { $0.name < $1.name }
+        // Оптимизация: вместо compactMap + sorted (O(M log M)),
+        // фильтруем уже отсортированный массив всех каналов за O(N).
+        return allChannelsSorted.filter { finalIds.contains($0.id) }
     }
 
     /// Получить все доступные потоки для конкретного канала
