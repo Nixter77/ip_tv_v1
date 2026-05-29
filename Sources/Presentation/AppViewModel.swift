@@ -119,7 +119,8 @@ public final class AppViewModel: ObservableObject {
             
             self.loadingState = .ready
         } catch {
-            self.loadingState = .error("Ошибка загрузки плейлиста: \(error.localizedDescription)")
+            let errorMsg = Stream.maskURLs(in: error.localizedDescription)
+            self.loadingState = .error("Ошибка загрузки плейлиста: \(errorMsg)")
         }
     }
     

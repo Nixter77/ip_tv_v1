@@ -60,6 +60,11 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
     /// URL string with masked sensitive information (credentials, query parameters) for UI display
     public var maskedUrlString: String {
+        Self.mask(urlString)
+    }
+
+    /// Masks sensitive information in a single URL string
+    public static func mask(_ urlString: String) -> String {
         guard var components = URLComponents(string: urlString) else {
             return urlString
         }
@@ -78,6 +83,27 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         }
 
         return components.string ?? urlString
+    }
+
+    /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
+    public static func maskURLs(in text: String) -> String {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return text
+        }
+
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        let matches = detector.matches(in: text, options: [], range: range)
+
+        var result = text
+        // Iterate backwards to not invalidate ranges as we replace text
+        for match in matches.reversed() {
+            guard let matchRange = Range(match.range, in: result) else { continue }
+            let urlString = String(result[matchRange])
+            let masked = mask(urlString)
+            result.replaceSubrange(matchRange, with: masked)
+        }
+
+        return result
     }
 
     enum CodingKeys: String, CodingKey {

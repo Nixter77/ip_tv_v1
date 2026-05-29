@@ -59,4 +59,18 @@ final class SecurityTests: XCTestCase {
         let masked = stream.maskedUrlString
         XCTAssertEqual(masked, "invalid url")
     }
+
+    func test_maskURLs_masksEmbeddedURLs() {
+        let rawError = "Failed to load stream at http://user:pass@host.com/play?token=123 and also check https://other.com/key=456 for details"
+        let masked = Stream.maskURLs(in: rawError)
+
+        XCTAssertTrue(masked.contains("http://****:****@host.com/play?token=****"))
+        XCTAssertTrue(masked.contains("https://other.com/key=****"))
+        XCTAssertFalse(masked.contains("user"))
+        XCTAssertFalse(masked.contains("pass"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("456"))
+        XCTAssertTrue(masked.contains("Failed to load stream at"))
+        XCTAssertTrue(masked.contains("and also check"))
+    }
 }

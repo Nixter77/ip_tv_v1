@@ -172,7 +172,8 @@ public final class PlayerStateManager: NSObject, PlayerStateManagerProtocol {
             self.state = .playing(stream: stream)
             
         case .failed:
-            let errorDescription = item.error?.localizedDescription ?? "Неизвестная ошибка сети"
+            let rawError = item.error?.localizedDescription ?? "Неизвестная ошибка сети"
+            let errorDescription = Stream.maskURLs(in: rawError)
             Task {
                 await handleStreamFailure(stream: stream, error: errorDescription)
             }
@@ -199,7 +200,8 @@ public final class PlayerStateManager: NSObject, PlayerStateManagerProtocol {
 
     private func handleTimeout(for stream: Stream) async {
         guard case .loading(let loadingStream) = state, loadingStream == stream else { return }
-        await handleStreamFailure(stream: stream, error: "Таймаут загрузки потока (\(timeoutInterval)с)")
+        let error = "Таймаут загрузки потока (\(timeoutInterval)с)"
+        await handleStreamFailure(stream: stream, error: Stream.maskURLs(in: error))
     }
 
     private func handleStreamFailure(stream: Stream, error: String) async {
