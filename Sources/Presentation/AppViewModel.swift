@@ -43,9 +43,9 @@ public final class AppViewModel: ObservableObject {
     @Published public private(set) var historyIds: [String] = []
     @Published public var isPlayerDetached: Bool = false
     
-    public let repository: IPTVRepositoryProtocol
-    public let filterEngine: ChannelFilterEngineProtocol
-    public let playerManager: PlayerStateManagerProtocol
+    public let repository: any IPTVRepositoryProtocol
+    public let filterEngine: any ChannelFilterEngineProtocol
+    public let playerManager: any PlayerStateManagerProtocol
     
     // SwiftData
     private let modelContainer: ModelContainer?
@@ -62,9 +62,9 @@ public final class AppViewModel: ObservableObject {
     ///   - playerManager: Менеджер воспроизведения
     ///   - modelContainer: SwiftData контейнер (опциональный для гибкости и тестирования)
     public init(
-        repository: IPTVRepositoryProtocol,
-        filterEngine: ChannelFilterEngineProtocol,
-        playerManager: PlayerStateManagerProtocol,
+        repository: any IPTVRepositoryProtocol,
+        filterEngine: any ChannelFilterEngineProtocol,
+        playerManager: any PlayerStateManagerProtocol,
         modelContainer: ModelContainer? = nil
     ) {
         self.repository = repository
