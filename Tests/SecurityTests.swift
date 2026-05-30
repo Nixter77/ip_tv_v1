@@ -73,4 +73,21 @@ final class SecurityTests: XCTestCase {
         XCTAssertTrue(masked.contains("Failed to load stream at"))
         XCTAssertTrue(masked.contains("and also check"))
     }
+
+    func test_stream_url_usesURLComponents_forParsing() {
+        // This test ensures we properly parse a URL that contains a space and fragment using the URLComponents logic
+        let stream = Stream(
+            channel: "test",
+            urlString: "http://example.com/test space?q=a b#frag",
+            status: nil,
+            timeshift: nil,
+            httpReferrer: nil
+        )
+
+        let url = stream.url
+        XCTAssertNotNil(url)
+        // If it was just using .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) on the whole string,
+        // it would incorrectly encode `#frag` as `%23frag`. We want to make sure it doesn't do that.
+        XCTAssertEqual(url?.absoluteString, "http://example.com/test%20space?q=a%20b#frag")
+    }
 }
