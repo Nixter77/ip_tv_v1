@@ -150,7 +150,9 @@ public final class AppViewModel: ObservableObject {
             return
         case .history:
             let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = Dictionary(uniqueKeysWithValues: allChannels.map { ($0.id, $0) })
+            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
+                map[channel.id] = channel
+            }
             self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             return
         }
