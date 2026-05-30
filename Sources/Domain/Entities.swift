@@ -59,11 +59,11 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             rawUrl = URL(string: urlString)
         }
 
-        // Security: Validate URL scheme to prevent unexpected protocols (e.g. file://, data://)
         guard let url = rawUrl, let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme) else {
+              scheme == "http" || scheme == "https" else {
             return nil
         }
+
         return url
     }
 
