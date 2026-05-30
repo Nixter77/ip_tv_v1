@@ -155,4 +155,74 @@ final class ChannelRepositoryTests: XCTestCase {
         XCTAssertEqual(streams[1].channel, "fox.us")
         XCTAssertEqual(streams[1].urlString, "http://fox-live.com/stream.m3u8")
     }
+
+    /// Проверяет успешное декодирование языков при корректном JSON
+    func test_validLanguageDecoding() async throws {
+        let jsonString = """
+        [
+            {
+                "code": "eng",
+                "name": "English"
+            },
+            {
+                "code": "rus",
+                "name": "Russian"
+            }
+        ]
+        """
+        let data = Data(jsonString.utf8)
+        let url = URL(string: "https://iptv-org.github.io/api/languages.json")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+        URLProtocolMock.mockData[url] = (data, response, nil)
+
+        let languages = try await repository.fetchLanguages()
+
+        XCTAssertEqual(languages.count, 2)
+        guard languages.count >= 2 else {
+            XCTFail("Languages array count is less than 2")
+            return
+        }
+        XCTAssertEqual(languages[0].code, "eng")
+        XCTAssertEqual(languages[0].name, "English")
+        XCTAssertEqual(languages[1].code, "rus")
+        XCTAssertEqual(languages[1].name, "Russian")
+    }
+
+    /// Проверяет, что один поврежденный элемент в массиве языков не ломает декодирование остальных
+    func test_corruptedLanguageArrayDecoding() async throws {
+        let jsonString = """
+        [
+            {
+                "code": "eng",
+                "name": "English"
+            },
+            {
+                "code": 123,
+                "name": "Invalid Code Type"
+            },
+            {
+                "code": "zho",
+                "name": "Chinese"
+            }
+        ]
+        """
+        let data = Data(jsonString.utf8)
+        let url = URL(string: "https://iptv-org.github.io/api/languages.json")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+        URLProtocolMock.mockData[url] = (data, response, nil)
+
+        let languages = try await repository.fetchLanguages()
+
+        XCTAssertEqual(languages.count, 2)
+        guard languages.count >= 2 else {
+            XCTFail("Languages array count is less than 2: \\(languages.count)")
+            return
+        }
+        XCTAssertEqual(languages[0].code, "eng")
+        XCTAssertEqual(languages[0].name, "English")
+        XCTAssertEqual(languages[1].code, "zho")
+        XCTAssertEqual(languages[1].name, "Chinese")
+    }
 }
