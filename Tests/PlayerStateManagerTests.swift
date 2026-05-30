@@ -1,3 +1,4 @@
+#if canImport(AVFoundation) && canImport(Combine)
 // Tests/PlayerStateManagerTests.swift
 import XCTest
 import AVFoundation
@@ -166,3 +167,5 @@ final class PlayerStateManagerTests: XCTestCase {
         XCTAssertEqual(manager.avPlayer.currentItem?.preferredPeakBitRate, 1_500_000)
     }
 }
+
+#endif

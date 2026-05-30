@@ -1,3 +1,4 @@
+#if canImport(SwiftUI) && canImport(AVKit)
 // Sources/Presentation/VideoPlayerView.swift
 import SwiftUI
 import AVKit
@@ -33,3 +34,5 @@ public struct VideoPlayerView: NSViewRepresentable {
         nsView.player = player
     }
 }
+
+#endif

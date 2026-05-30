@@ -1,3 +1,4 @@
+#if canImport(Combine) && canImport(SwiftData) && canImport(AVFoundation)
 // Tests/AppViewModelTests.swift
 import XCTest
 import Combine
@@ -126,3 +127,5 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(playerManager.state, .loading(stream: streams.first!))
     }
 }
+
+#endif

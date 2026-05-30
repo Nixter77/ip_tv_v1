@@ -1,3 +1,4 @@
+#if canImport(SwiftUI) && canImport(AVFoundation)
 // Sources/Presentation/DetachedPlayerView.swift
 import SwiftUI
 import AVFoundation
@@ -107,3 +108,5 @@ public struct DetachedPlayerView: View {
     }
     
 }
+
+#endif
