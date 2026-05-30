@@ -7,3 +7,7 @@
 ## 2025-05-15 - [Optimization] Pre-sorted Result Filtering
 **Learning:** In scenarios with large datasets (e.g., 50k items) that need to be returned in a specific order (e.g., by name), it is significantly faster to maintain a single pre-sorted master list and filter it by matching IDs ($O(N)$) rather than collecting matches and then sorting them ($O(M \log M)$). This is especially true when the result set ($M$) is large.
 **Action:** Use `preSortedArray.filter { resultSet.contains($0.id) }` for sorted output in high-performance lookup engines.
+
+## 2026-05-30 - [Optimization] Indexed Access over Dictionary Lookup
+**Learning:** Even with O(1) average time complexity, dictionary lookups in Swift have measurable hashing overhead. For high-frequency loops (e.g., iterating over thousands of search tokens), mirroring dictionary values in a parallel array and using direct indexed access ((1)$ constant time) is significantly faster.
+**Action:** Use a parallel array (e.g., `tokenSets: [Set<String>]`) that maps 1:1 to a sorted keys array (`sortedTokens: [String]`) to eliminate lookup overhead in tight loops.

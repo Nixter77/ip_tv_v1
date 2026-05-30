@@ -4,7 +4,7 @@ import Foundation
 /// Расширение для быстрого свертывания диакритических знаков и приведения к нижнему регистру
 private extension String {
     func foldedForSearch() -> String {
-        return self.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        return self.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
     }
 }
 
@@ -46,6 +46,9 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     // Отсортированный массив токенов для сверхбыстрого двоичного поиска по префиксу
     private var sortedTokens: [String] = []
     
+    // Кэшированные наборы ID каналов, соответствующие sortedTokens (1:1), для исключения lookup-ов в словаре
+    private var tokenSets: [Set<String>] = []
+
     // Предварительно отсортированный список всех активных каналов (для мгновенного возврата при отсутствии фильтров)
     private var allChannelsSorted: [Channel] = []
 
@@ -63,6 +66,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         self.channelsByLanguage.removeAll(keepingCapacity: true)
         self.channelIdsByNameToken.removeAll(keepingCapacity: true)
         self.sortedTokens.removeAll(keepingCapacity: true)
+        self.tokenSets.removeAll(keepingCapacity: true)
 
         // 1. Фильтруем и индексируем рабочие потоки (исключаем status == "error")
         for stream in streams {
@@ -104,6 +108,9 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         
         // Сортируем токены один раз при старте для обеспечения O(log N) поиска
         self.sortedTokens = channelIdsByNameToken.keys.sorted()
+
+        // Кэшируем соответствующие наборы ID в массив для мгновенного доступа по индексу (O(1))
+        self.tokenSets = sortedTokens.compactMap { channelIdsByNameToken[$0] }
 
         // Кэшируем отсортированный список всех каналов
         self.allChannelsSorted = self.channels.values.sorted { $0.name < $1.name }
@@ -211,11 +218,10 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                 // Используем сверхбыстрый двоичный поиск для префиксов
                 if let range = findTokenRange(startingWith: token) {
                     for index in range {
-                        let matchingToken = sortedTokens[index]
-                        if let ids = channelIdsByNameToken[matchingToken] {
-                            // Оптимизация: используем formUnion для избежания промежуточных массивов
-                            matchesForToken.formUnion(ids)
-                        }
+                        // Оптимизация: используем прямой доступ к кэшированным наборам ID по индексу (O(1))
+                        // Это быстрее, чем lookup в словаре channelIdsByNameToken[sortedTokens[index]]
+                        let ids = tokenSets[index]
+                        matchesForToken.formUnion(ids)
                     }
                 }
 
