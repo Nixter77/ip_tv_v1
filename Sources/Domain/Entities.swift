@@ -53,8 +53,8 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
     public var url: URL? {
         let rawUrl: URL?
-        if let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            rawUrl = URL(string: encoded)
+        if let components = URLComponents(string: urlString), let componentUrl = components.url {
+            rawUrl = componentUrl
         } else {
             rawUrl = URL(string: urlString)
         }
