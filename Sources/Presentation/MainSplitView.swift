@@ -238,6 +238,10 @@ public struct MainSplitView: View {
                         Text("История пуста")
                             .font(.title3)
                             .foregroundColor(.secondary)
+                        Button("Перейти ко всем каналам") {
+                            viewModel.selectedTab = .all
+                        }
+                        .buttonStyle(.bordered)
                     } else if !viewModel.searchQuery.isEmpty {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 40))
@@ -313,7 +317,11 @@ public struct MainSplitView: View {
                                 .ignoresSafeArea()
                             
                             // Кастомный HUD оверлей при загрузке или ошибке
-                            PlayerHUDOverlay(state: viewModel.playerManager.state)
+                            PlayerHUDOverlay(state: viewModel.playerManager.state, onRetry: {
+                                Task {
+                                    await viewModel.play(channel: channel)
+                                }
+                            })
                         }
                     }
                     
