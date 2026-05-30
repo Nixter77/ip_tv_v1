@@ -131,9 +131,9 @@ public final class AppViewModel: ObservableObject {
     
     /// Обновление списка отфильтрованных каналов через FilterEngine
     private func updateFilteredChannels() async {
-        var categoryFilter: String? = nil
-        var countryFilter: String? = nil
-        var languageFilter: String? = nil
+        var categoryFilter: String?
+        var countryFilter: String?
+        var languageFilter: String?
         
         switch selectedTab {
         case .all:
