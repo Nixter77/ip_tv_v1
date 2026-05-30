@@ -43,6 +43,7 @@ struct IPTVApp: App {
                 .navigationTitle("IPTV Player Pro")
         }
         .windowStyle(.hiddenTitleBar) // Скрываем верхнюю плашку для максимального погружения
+        .windowBackgroundDragBehavior(.disabled)
         
         Window("Проигрыватель", id: "detached-player") {
             DetachedPlayerView(viewModel: viewModel)
