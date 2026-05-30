@@ -194,11 +194,11 @@ public final class AppViewModel: ObservableObject {
             let items = try context.fetch(descriptor)
             
             // Восстанавливаем Избранное
-            let favorites = items.filter { $0.isFavorite }.map { $0.id }
+            let favorites = items.compactMap { $0.isFavorite ? $0.id : nil }
             self.favoriteIds = Set(favorites)
             
             // Восстанавливаем Историю (сортируем по дате просмотра от свежих к старым)
-            let history = items.filter { $0.lastViewedAt != nil }
+            let history = items.compactMap { $0.lastViewedAt != nil ? $0 : nil }
                 .sorted { ($0.lastViewedAt ?? Date.distantPast) > ($1.lastViewedAt ?? Date.distantPast) }
                 .map { $0.id }
             
