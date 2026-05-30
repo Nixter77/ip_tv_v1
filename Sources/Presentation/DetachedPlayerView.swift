@@ -25,7 +25,13 @@ public struct DetachedPlayerView: View {
                         .ignoresSafeArea()
                     
                     // HUD Оверлей загрузки или ошибок
-                    PlayerHUDOverlay(state: viewModel.playerManager.state)
+                    PlayerHUDOverlay(state: viewModel.playerManager.state, onRetry: {
+                        if let channel = viewModel.playerManager.currentChannel {
+                            Task {
+                                await viewModel.play(channel: channel)
+                            }
+                        }
+                    })
                     
                     // Кнопки управления в левом верхнем углу
                     VStack {

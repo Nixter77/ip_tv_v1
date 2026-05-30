@@ -4,6 +4,7 @@ import SwiftUI
 /// HUD Оверлей поверх плеера для отображения состояний загрузки и ошибок
 struct PlayerHUDOverlay: View {
     let state: PlayerState
+    var onRetry: (() -> Void)? = nil
 
     var body: some View {
         Group {
@@ -47,6 +48,17 @@ struct PlayerHUDOverlay: View {
                             .foregroundColor(.gray)
                             .lineLimit(1)
                             .padding(.horizontal)
+
+                        if let onRetry = onRetry {
+                            Button(action: onRetry) {
+                                Label("Попробовать снова", systemImage: "arrow.clockwise")
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.white)
+                            .padding(.top, 8)
+                            .help("Попробовать загрузить поток еще раз")
+                            .accessibilityLabel("Попробовать снова")
+                        }
                     }
                 }
             }

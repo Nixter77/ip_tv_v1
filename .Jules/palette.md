@@ -5,3 +5,7 @@
 ## 2026-05-29 - [Context-Aware Empty States and Recovery Actions]
 **Learning:** Generic "no results" messages are frustrating. Differentiating empty states based on context (e.g., Favorites vs. Search) and providing an immediate "escape hatch" (e.g., "Go to All Channels") significantly reduces user friction in navigation-heavy apps.
 **Action:** Implement context-specific empty states with relevant icons and helpful call-to-action buttons.
+
+## 2026-05-30 - [Actionable Error States in Media Playback]
+**Learning:** In media playback interfaces, providing an immediate "Retry" action directly within the error overlay reduces the cognitive load of navigating back to a list to restart a stream.
+**Action:** Always include an `onRetry` callback in player error HUDs to allow one-click recovery from transient network failures.
