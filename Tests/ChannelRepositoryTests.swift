@@ -116,6 +116,66 @@ final class ChannelRepositoryTests: XCTestCase {
         XCTAssertNil(channels.first?.website)
     }
 
+    /// Проверяет успешное декодирование стран при корректном JSON
+    func test_validCountryDecoding() async throws {
+        let jsonString = """
+        [
+            {
+                "code": "us",
+                "name": "United States",
+                "languages": ["eng", "spa"],
+                "flag": "🇺🇸"
+            }
+        ]
+        """
+        let data = Data(jsonString.utf8)
+        let url = URL(string: "https://iptv-org.github.io/api/countries.json")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+        URLProtocolMock.mockData[url] = (data, response, nil)
+
+        let countries = try await repository.fetchCountries()
+
+        XCTAssertEqual(countries.count, 1)
+        guard !countries.isEmpty else {
+            XCTFail("Countries array is empty")
+            return
+        }
+        XCTAssertEqual(countries.first?.code, "us")
+        XCTAssertEqual(countries.first?.name, "United States")
+        XCTAssertEqual(countries.first?.languages, ["eng", "spa"])
+        XCTAssertEqual(countries.first?.flag, "🇺🇸")
+    }
+
+    /// Проверяет успешное декодирование страны при отсутствии необязательных полей
+    func test_missingOptionalFieldsCountryDecoding() async throws {
+        let jsonString = """
+        [
+            {
+                "code": "us",
+                "name": "United States"
+            }
+        ]
+        """
+        let data = Data(jsonString.utf8)
+        let url = URL(string: "https://iptv-org.github.io/api/countries.json")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+        URLProtocolMock.mockData[url] = (data, response, nil)
+
+        let countries = try await repository.fetchCountries()
+
+        XCTAssertEqual(countries.count, 1)
+        guard !countries.isEmpty else {
+            XCTFail("Countries array is empty")
+            return
+        }
+        XCTAssertEqual(countries.first?.code, "us")
+        XCTAssertEqual(countries.first?.name, "United States")
+        XCTAssertEqual(countries.first?.languages, [])
+        XCTAssertNil(countries.first?.flag)
+    }
+
     /// Проверяет, что один поврежденный элемент в массиве стримов не ломает декодирование остальных валидных стримов
     func test_corruptedStreamArrayDecoding() async throws {
         let jsonString = """
