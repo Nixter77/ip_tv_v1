@@ -1,41 +1,24 @@
-# Tasks Checklist — Доработка поиска, битрейта, полноэкранного режима и отдельного окна плеера
+# Code Review and Fix Plan
 
-## Текущие задачи (Bug Fixing & Features)
+## Scope
+Perform a full local code review of the Swift IPTV app, identify concrete correctness/security/build-quality issues, fix the highest-impact problems with minimal code changes, and verify with tests.
 
-- [x] **1. Исправление ввода в поиске**
-  - [x] Удалить скрытые кнопки со шорткатами из `MainSplitView.swift`
-  - [x] Реализовать нативный Sonoma API `.onKeyPress` на уровне окна
-  - [x] Проверить, что пробел вводится в поиске и работает как пауза вне поиска
+## Checklist
+- [x] Inspect package structure, existing task notes, and current git state.
+- [x] Run the existing test suite to establish a baseline.
+- [x] Review domain/data/presentation code for correctness, security, concurrency, persistence, and test gaps.
+- [x] Implement focused fixes for verified issues only.
+- [x] Run formatting/build/tests or the closest available verification commands.
+- [x] Review the final diff for elegance/minimality and document results.
+- [x] Commit changes and open a PR.
 
-- [x] **2. Регулирование битрейта канала**
-  - [x] Добавить `preferredBitrate` во `PlayerStateManager`
-  - [x] Применить `preferredPeakBitRate` при создании `AVPlayerItem`
-  - [x] Написать юнит-тест `test_preferredBitratePropagation`
-  - [x] Добавить выпадающий список (Picker) в UI информации о канале
-
-- [x] **3. Исправление полноэкранного режима**
-  - [x] Реализовать глобальный перехват `Esc` (код 53) через `NSEvent.addLocalMonitorForEvents` для нативного выхода из полноэкранного режима
-  - [x] Добавить выделенные кнопки "Во весь экран" в `MainSplitView` и `DetachedPlayerView`
-  - [x] Убедиться, что `showsFullScreenToggleButton` настроен правильно в `VideoPlayerView`
-
-- [x] **4. Просмотр в отдельном окне**
-  - [x] Зарегистрировать `Window("Проигрыватель", id: "detached-player")` в `IPTVApp.swift`
-  - [x] Создать `DetachedPlayerView.swift`
-  - [x] Добавить кнопку отсоединения плеера и плейсхолдер в `MainSplitView.swift`
-  - [x] Обеспечить бесшовный перенос общего `AVPlayer` между окнами
-  - [x] Реализовать `.onDisappear` в `DetachedPlayerView` для автоматического возврата плеера в главное окно при закрытии отдельного окна через стандартный интерфейс macOS.
-
-- [x] **5. Оптимизация производительности: ChannelFilterEngine**
-  - [x] Оптимизировать поиск префиксов в `findTokens` (Range вместо массива)
-  - [x] Перейти на `formIntersection` для уменьшения аллокаций при фильтрации
-  - [x] Использовать `allChannelsSorted` для O(N) получения отсортированного результата
-
----
-
-## Review & Validation Results
-
-Все тесты были успешно скомпилированы и пройдены (17 из 17 тестов пройдены успешно, включая тесты на управление качеством и переключение битрейтов):
-- `test_preferredBitratePropagation` проверяет корректность установки `preferredPeakBitRate` на `AVPlayerItem`.
-- Ручное тестирование показало идеальное поведение ввода в `TextField` поиска без блокировки клавиши пробела.
-- Локальный мониторинг `NSEvent` перехватывает клавишу `Esc` при активном полноэкранном режиме и мгновенно возвращает окно в стандартный размер, обеспечивая отличную эргономику.
-- Перемещение воспроизведения между главным и отдельным окнами работает бесшовно благодаря общей SwiftUI-модели `AppViewModel`.
+## Review Results
+- Baseline `swift test` failed before tests could run because Linux Swift lacks Apple-only modules such as SwiftData, SwiftUI, Combine, AVFoundation, and AVKit.
+- The package always declared the graphical executable target, so non-macOS builds attempted to link an empty conditionally compiled app target and failed.
+- Several source and test files imported Apple-only modules unconditionally; guarded those files so portable domain/repository/security tests can run in this environment without changing macOS behavior.
+- `IPTVRepository` and repository tests needed `FoundationNetworking` on Linux for URLSession, URLProtocol, URLResponse, and HTTPURLResponse.
+- `Stream.maskURLs(in:)` used `NSDataDetector`, which is unavailable in Linux Foundation; replaced it with a portable regex-based URL scanner.
+- `Stream.mask(_:)` treated non-URL text as a path and percent-escaped it, which leaked into UI/tests as `invalid%20url`; it now only URL-masks strings with an actual scheme.
+- Some provider/error URLs carry token-looking `key=value` data in path segments instead of query parameters; those values are now masked as well.
+- `AppViewModel.loadData()` used `Task.detached` while capturing the main-actor view model; replaced it with direct `async let` fetches, preserving concurrency without leaving actor isolation unnecessarily.
+- Verification after fixes: `swift test` passes 17 portable tests in this Linux environment; Apple-framework tests remain available behind import guards on macOS.

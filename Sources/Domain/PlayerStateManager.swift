@@ -1,3 +1,4 @@
+#if canImport(AVFoundation) && canImport(Combine)
 // Sources/Domain/PlayerStateManager.swift
 import Foundation
 import AVFoundation
@@ -215,3 +216,5 @@ public final class PlayerStateManager: NSObject, PlayerStateManagerProtocol {
         }
     }
 }
+
+#endif

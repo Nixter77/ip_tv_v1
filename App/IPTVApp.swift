@@ -1,3 +1,4 @@
+#if canImport(SwiftUI) && canImport(SwiftData)
 // App/IPTVApp.swift
 import SwiftUI
 import SwiftData
@@ -48,3 +49,5 @@ struct IPTVApp: App {
         }
     }
 }
+
+#endif

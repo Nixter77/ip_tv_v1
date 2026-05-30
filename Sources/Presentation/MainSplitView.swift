@@ -1,3 +1,4 @@
+#if canImport(SwiftUI) && canImport(AVFoundation)
 // Sources/Presentation/MainSplitView.swift
 import SwiftUI
 import AVFoundation
@@ -536,3 +537,5 @@ struct VisualEffectView: NSViewRepresentable {
         nsView.blendingMode = blendingMode
     }
 }
+
+#endif

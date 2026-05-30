@@ -1,3 +1,4 @@
+#if canImport(Combine) && canImport(SwiftData)
 // Sources/Presentation/AppViewModel.swift
 import Foundation
 import SwiftUI
@@ -99,16 +100,20 @@ public final class AppViewModel: ObservableObject {
     public func loadData() async {
         self.loadingState = .loading
         do {
-            let (channels, streams, cats, ctrs, langs) = try await Task.detached(priority: .userInitiated) {
-                async let channelsFetch = self.repository.fetchChannels()
-                async let streamsFetch = self.repository.fetchStreams()
-                async let catsFetch = self.repository.fetchCategories()
-                async let ctrsFetch = self.repository.fetchCountries()
-                async let langsFetch = self.repository.fetchLanguages()
-                
-                return try await (channelsFetch, streamsFetch, catsFetch, ctrsFetch, langsFetch)
-            }.value
-            
+            async let channelsFetch = repository.fetchChannels()
+            async let streamsFetch = repository.fetchStreams()
+            async let catsFetch = repository.fetchCategories()
+            async let ctrsFetch = repository.fetchCountries()
+            async let langsFetch = repository.fetchLanguages()
+
+            let (channels, streams, cats, ctrs, langs) = try await (
+                channelsFetch,
+                streamsFetch,
+                catsFetch,
+                ctrsFetch,
+                langsFetch
+            )
+
             await filterEngine.setup(channels: channels, streams: streams)
             
             self.categories = cats.sorted { $0.name < $1.name }
@@ -288,3 +293,5 @@ public final class AppViewModel: ObservableObject {
         }
     }
 }
+
+#endif

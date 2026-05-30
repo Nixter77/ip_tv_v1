@@ -1,5 +1,9 @@
 // Tests/ChannelRepositoryTests.swift
 import XCTest
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import IPTVPlayer
 
 final class URLProtocolMock: URLProtocol {

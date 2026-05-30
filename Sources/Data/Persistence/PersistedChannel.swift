@@ -1,3 +1,4 @@
+#if canImport(SwiftData)
 // Sources/Data/Persistence/PersistedChannel.swift
 import Foundation
 import SwiftData
@@ -25,3 +26,5 @@ public final class PersistedChannel {
         self.lastViewedAt = lastViewedAt
     }
 }
+
+#endif

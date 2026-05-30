@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 // Sources/Presentation/PlayerHUDOverlay.swift
 import SwiftUI
 
@@ -65,3 +66,5 @@ struct PlayerHUDOverlay: View {
         }
     }
 }
+
+#endif
