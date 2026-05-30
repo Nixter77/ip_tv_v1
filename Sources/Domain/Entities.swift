@@ -52,13 +52,22 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
     public let httpReferrer: String?
 
     public var url: URL? {
+        let rawUrl: URL?
         if let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            return URL(string: encoded)
+            rawUrl = URL(string: encoded)
+        } else {
+            rawUrl = URL(string: urlString)
         }
-        return URL(string: urlString)
+
+        // Security: Validate URL scheme to prevent unexpected protocols (e.g. file://, data://)
+        guard let url = rawUrl, let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme) else {
+            return nil
+        }
+        return url
     }
 
-    /// URL string with masked sensitive information (credentials, query parameters) for UI display
+    /// URL string with masked sensitive information (credentials, query parameters, fragments) for UI display
     public var maskedUrlString: String {
         Self.mask(urlString)
     }
@@ -66,7 +75,9 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
     /// Masks sensitive information in a single URL string
     public static func mask(_ urlString: String) -> String {
         guard var components = URLComponents(string: urlString) else {
-            return urlString
+            // Fail-secure: If parsing fails, try a simple regex-based mask for common credential patterns
+            // to avoid returning a raw URL that might contain tokens.
+            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
         }
 
         // Mask user credentials
@@ -80,6 +91,11 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         // Mask query parameter values to protect session tokens/keys
         if let queryItems = components.queryItems {
             components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
+        }
+
+        // Mask fragments (anchors) as they often carry sensitive routing or session info
+        if components.fragment != nil {
+            components.fragment = "****"
         }
 
         return components.string ?? urlString
