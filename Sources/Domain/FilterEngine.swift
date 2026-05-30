@@ -71,6 +71,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         }
 
         // 2. Индексируем каналы
+        let nonAlphanumerics = Self.nonAlphanumerics
         for channel in channels {
             // Оставляем только те каналы, у которых есть хотя бы один рабочий поток
             guard self.activeStreams[channel.id] != nil else { continue }
@@ -94,7 +95,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             
             // Токенизация названия для поиска (диакритика вырезается)
             let tokens = channel.name.foldedForSearch()
-                .components(separatedBy: Self.nonAlphanumerics)
+                .components(separatedBy: nonAlphanumerics)
                 .filter { !$0.isEmpty }
             for token in tokens {
                 self.channelIdsByNameToken[token, default: []].insert(channel.id)
