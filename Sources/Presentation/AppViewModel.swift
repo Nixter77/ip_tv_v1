@@ -207,7 +207,7 @@ public final class AppViewModel: ObservableObject {
             // Ограничиваем историю 50 элементами по ТЗ
             self.historyIds = Array(history.prefix(50))
         } catch {
-            print("Не удалось прочитать данные из SwiftData: \(error)")
+            print("Не удалось прочитать данные из SwiftData: \(Stream.maskURLs(in: error.localizedDescription))")
         }
     }
 
@@ -231,7 +231,7 @@ public final class AppViewModel: ObservableObject {
             }
             try context.save()
         } catch {
-            print("Ошибка при записи избранного в SwiftData: \(error)")
+            print("Ошибка при записи избранного в SwiftData: \(Stream.maskURLs(in: error.localizedDescription))")
         }
     }
 
@@ -263,7 +263,7 @@ public final class AppViewModel: ObservableObject {
             }
             try context.save()
         } catch {
-            print("Ошибка при записи истории в SwiftData: \(error)")
+            print("Ошибка при записи истории в SwiftData: \(Stream.maskURLs(in: error.localizedDescription))")
         }
     }
     
