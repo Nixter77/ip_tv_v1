@@ -6,26 +6,31 @@ import Combine
 
 @MainActor
 final class AppViewModelTests: XCTestCase {
-    private var session: URLSession!
-    private var repository: IPTVRepository!
-    private var filterEngine: ChannelFilterEngine!
-    private var playerManager: PlayerStateManager!
-    private var viewModel: AppViewModel!
+    private var session: URLSession?
+    private var repository: IPTVRepository?
+    private var filterEngine: ChannelFilterEngine?
+    private var playerManager: PlayerStateManager?
+    private var viewModel: AppViewModel?
 
     override func setUp() {
         super.setUp()
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [URLProtocolMock.self]
-        session = URLSession(configuration: config)
-        repository = IPTVRepository(session: session)
         
-        filterEngine = ChannelFilterEngine()
-        playerManager = PlayerStateManager()
+        let newSession = URLSession(configuration: config)
+        let newRepository = IPTVRepository(session: newSession)
+        let newFilterEngine = ChannelFilterEngine()
+        let newPlayerManager = PlayerStateManager()
+
+        session = newSession
+        repository = newRepository
+        filterEngine = newFilterEngine
+        playerManager = newPlayerManager
         
         viewModel = AppViewModel(
-            repository: repository,
-            filterEngine: filterEngine,
-            playerManager: playerManager
+            repository: newRepository,
+            filterEngine: newFilterEngine,
+            playerManager: newPlayerManager
         )
         
         URLProtocolMock.mockData.removeAll()
@@ -79,52 +84,60 @@ final class AppViewModelTests: XCTestCase {
     func test_loadDataSuccess() async throws {
         makeMockJSONData()
         
-        XCTAssertEqual(viewModel.loadingState, .loading)
+        let vm = try XCTUnwrap(viewModel)
+        let engine = try XCTUnwrap(filterEngine)
+
+        XCTAssertEqual(vm.loadingState, .loading)
         
-        await viewModel.loadData()
+        await vm.loadData()
         
-        XCTAssertEqual(viewModel.loadingState, .ready)
-        XCTAssertEqual(viewModel.categories.count, 1)
-        XCTAssertEqual(viewModel.countries.count, 1)
-        XCTAssertEqual(viewModel.languages.count, 1)
+        XCTAssertEqual(vm.loadingState, .ready)
+        XCTAssertEqual(vm.categories.count, 1)
+        XCTAssertEqual(vm.countries.count, 1)
+        XCTAssertEqual(vm.languages.count, 1)
         
-        let channels = await filterEngine.filter(query: nil, category: nil, country: nil, language: nil)
+        let channels = await engine.filter(query: nil, category: nil, country: nil, language: nil)
         XCTAssertEqual(channels.count, 1)
     }
 
     /// Тест: Изменение поискового запроса обновляет список каналов
     func test_filterTriggersOnSearchQueryChange() async throws {
         makeMockJSONData()
-        await viewModel.loadData()
+        let vm = try XCTUnwrap(viewModel)
+        await vm.loadData()
         
         // Изначально канал "CNN" должен находиться в списке
-        XCTAssertEqual(viewModel.filteredChannels.count, 1)
+        XCTAssertEqual(vm.filteredChannels.count, 1)
         
         // Меняем строку поиска на несуществующую
-        viewModel.searchQuery = "nonexistent"
+        vm.searchQuery = "nonexistent"
         
         // Ждем небольшое время для прогона асинхронного обновления (Combine/State)
         try? await Task.sleep(nanoseconds: 50_000_000)
         
-        XCTAssertEqual(viewModel.filteredChannels.count, 0)
+        XCTAssertEqual(vm.filteredChannels.count, 0)
     }
 
     /// Тест: Метод play(channel:) корректно запускает воспроизведение в PlayerStateManager
     func test_playChannel() async throws {
         makeMockJSONData()
-        await viewModel.loadData()
+        let vm = try XCTUnwrap(viewModel)
+        let player = try XCTUnwrap(playerManager)
+        let engine = try XCTUnwrap(filterEngine)
+
+        await vm.loadData()
         
-        guard let channel = viewModel.filteredChannels.first else {
+        guard let channel = vm.filteredChannels.first else {
             XCTFail("No channels found")
             return
         }
         
-        XCTAssertEqual(playerManager.state, .idle)
+        XCTAssertEqual(player.state, .idle)
         
-        await viewModel.play(channel: channel)
+        await vm.play(channel: channel)
         
-        let streams = await filterEngine.streams(for: channel.id)
-        XCTAssertEqual(playerManager.state, .loading(stream: streams.first!))
+        let streams = await engine.streams(for: channel.id)
+        XCTAssertEqual(player.state, .loading(stream: streams.first!))
     }
 }
 
