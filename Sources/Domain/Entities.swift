@@ -51,11 +51,27 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
     public let timeshift: Int?
     public let httpReferrer: String?
 
+    /// Allowed characters for IPTV URL robust parsing (including # fragment which is NOT in urlQueryAllowed)
+    private static let iptvUrlAllowed: CharacterSet = {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.insert("#")
+        return allowed
+    }()
+
     public var url: URL? {
-        guard let components = URLComponents(string: urlString),
-              let url = components.url,
+        // Try standard parsing first.
+        if let url = URL(string: urlString),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            return url
+        }
+
+        // Robust parsing fallback: IPTV stream URLs often contain unencoded spaces.
+        // We encode spaces but MUST preserve query/fragment structure (# and ?) before initializing URL.
+        guard let encodedString = urlString.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed),
+              let url = URL(string: encodedString),
               let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme) else {
+              scheme == "http" || scheme == "https" else {
             return nil
         }
 
@@ -69,10 +85,15 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
     /// Masks sensitive information in a single URL string
     public static func mask(_ urlString: String) -> String {
-        guard var components = URLComponents(string: urlString),
-              components.scheme != nil else {
-            // Fail-secure: If parsing fails, try a simple regex-based mask for common credential patterns
-            // to avoid returning a raw URL that might contain tokens.
+        // Attempt parsing. If it fails (e.g. due to spaces), try encoding it first (preserving #).
+        var components = URLComponents(string: urlString)
+        if components == nil, let encoded = urlString.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed) {
+            components = URLComponents(string: encoded)
+        }
+
+        guard var components = components, components.scheme != nil else {
+            // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
+            // for common credential patterns to avoid returning a raw URL that might contain tokens.
             return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
         }
 
