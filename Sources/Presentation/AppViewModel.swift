@@ -27,10 +27,10 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
     @Published public var searchQuery: String = "" {
-        didSet { saveSettings() }
+        didSet { saveSearchQuery() }
     }
     @Published public var selectedTab: SidebarTab = .all {
-        didSet { saveSettings() }
+        didSet { saveSelectedTab() }
     }
     @Published public private(set) var filteredChannels: [Channel] = []
     
@@ -79,7 +79,15 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
-        Publishers.CombineLatest3($searchQuery, $selectedTab, $favoriteIds)
+        Publishers.CombineLatest3(
+            $searchQuery
+                .removeDuplicates()
+                .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
+            $selectedTab
+                .removeDuplicates(),
+            $favoriteIds
+                .removeDuplicates()
+        )
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _, _, _ in
                 Task {
@@ -274,12 +282,22 @@ public final class AppViewModel: ObservableObject {
     
     // MARK: - UserDefaults Логика настроек сессии
 
-    /// Сохранение выбранных фильтров в UserDefaults
-    private func saveSettings() {
+    /// Сохранение поискового запроса в UserDefaults (быстрая операция со строкой)
+    private func saveSearchQuery() {
+        UserDefaults.standard.set(searchQuery, forKey: "lastSearchQuery")
+    }
+
+    /// Сохранение выбранной вкладки в UserDefaults (операция с JSON кодированием)
+    private func saveSelectedTab() {
         if let encoded = try? JSONEncoder().encode(selectedTab) {
             UserDefaults.standard.set(encoded, forKey: "lastSelectedTab")
         }
-        UserDefaults.standard.set(searchQuery, forKey: "lastSearchQuery")
+    }
+
+    /// Сохранение всех настроек (для обратной совместимости или пакетного обновления)
+    private func saveSettings() {
+        saveSearchQuery()
+        saveSelectedTab()
     }
     
     /// Восстановление фильтров из UserDefaults при старте
