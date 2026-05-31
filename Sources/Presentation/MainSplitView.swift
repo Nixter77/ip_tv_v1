@@ -364,6 +364,8 @@ public struct MainSplitView: View {
                         .pickerStyle(.menu)
                         .frame(width: 140)
                         .padding(.trailing, 8)
+                        .help("Выбрать качество видео")
+                        .accessibilityLabel("Выбор качества видео")
                         
                         // Кнопка отсоединения плеера в отдельное окно
                         if !viewModel.isPlayerDetached {
@@ -453,6 +455,7 @@ struct ChannelRowView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 44, height: 44)
                         .cornerRadius(6)
+                        .accessibilityLabel("Логотип канала \(channel.name)")
                 default:
                     // Красивый градиентный плейсхолдер с первой буквой канала
                     ZStack {
@@ -468,6 +471,7 @@ struct ChannelRowView: View {
                     }
                     .frame(width: 44, height: 44)
                     .cornerRadius(6)
+                    .accessibilityLabel("Логотип \(channel.name) отсутствует")
                 }
             }
             
@@ -496,16 +500,14 @@ struct ChannelRowView: View {
             Spacer()
             
             // Кнопка избранного, появляется при hover или если уже в избранном
-            if isHovered || isFavorite {
-                Button(action: onFavoriteToggle) {
-                    Image(systemName: isFavorite ? "heart.fill" : "heart")
-                        .foregroundColor(isFavorite ? .pink : .secondary)
-                }
-                .buttonStyle(.plain)
-                .transition(.opacity)
-                .help(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
-                .accessibilityLabel(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
+            Button(action: onFavoriteToggle) {
+                Image(systemName: isFavorite ? "heart.fill" : "heart")
+                    .foregroundColor(isFavorite ? .pink : .secondary)
             }
+            .buttonStyle(.plain)
+            .opacity(isHovered || isFavorite ? 1 : 0)
+            .help(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
+            .accessibilityLabel(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
@@ -516,6 +518,19 @@ struct ChannelRowView: View {
             }
         }
         .scaleEffect(isHovered ? 1.01 : 1.0)
+        .contextMenu {
+            Button(action: onFavoriteToggle) {
+                Label(isFavorite ? "Удалить из избранного" : "Добавить в избранное",
+                      systemImage: isFavorite ? "heart.slash" : "heart")
+            }
+
+            Button(action: {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(channel.name, forType: .string)
+            }) {
+                Label("Копировать название", systemImage: "doc.on.doc")
+            }
+        }
     }
 }
 
