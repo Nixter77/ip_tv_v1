@@ -132,7 +132,17 @@ public final class PlayerStateManager: NSObject, PlayerStateManagerProtocol {
         let playerItem = AVPlayerItem(url: url)
         playerItem.preferredPeakBitRate = preferredBitrate
         
-        if let referrer = stream.httpReferrer, playerItem.asset is AVURLAsset {
+        var validReferrer: String?
+        if let referrer = stream.httpReferrer,
+           !referrer.contains("\r"),
+           !referrer.contains("\n"),
+           let referrerURL = URL(string: referrer),
+           let scheme = referrerURL.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            validReferrer = referrer
+        }
+
+        if let referrer = validReferrer, playerItem.asset is AVURLAsset {
             let options = ["AVURLAssetHTTPHeaderFieldsKey": ["Referer": referrer]]
             let customAsset = AVURLAsset(url: url, options: options)
             let customItem = AVPlayerItem(asset: customAsset)
