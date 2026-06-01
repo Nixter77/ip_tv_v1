@@ -151,4 +151,55 @@ final class ChannelFilterEngineTests: XCTestCase {
         XCTAssertLessThan(filterDuration, 0.080, "Filter duration must be under 80ms in Debug mode")
         XCTAssertFalse(filtered.isEmpty)
     }
+
+    /// Тест: фильтрация с ограничением по ID (matchingIds)
+    func test_filterWithMatchingIds() async {
+        let channels = [
+            makeChannel(id: "ch1", name: "Channel One"),
+            makeChannel(id: "ch2", name: "Channel Two"),
+            makeChannel(id: "ch3", name: "News 1")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        // Фильтруем "Channel" но только среди [ch2, ch3]
+        let filtered = await engine.filter(
+            query: "Channel",
+            category: nil,
+            country: nil,
+            language: nil,
+            matchingIds: Set(["ch2", "ch3"])
+        )
+
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertEqual(filtered.first?.id, "ch2")
+    }
+
+    /// Тест: получение каналов по списку ID
+    func test_getChannelsByIds() async {
+        let channels = [
+            makeChannel(id: "ch1", name: "Channel One"),
+            makeChannel(id: "ch2", name: "Channel Two")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        let results = await engine.getChannels(ids: ["ch2", "ch1", "nonexistent"])
+        XCTAssertEqual(results.count, 2)
+        XCTAssertEqual(results[0].id, "ch2")
+        XCTAssertEqual(results[1].id, "ch1")
+    }
+
+    /// Тест: получение одного канала по ID
+    func test_getChannelById() async {
+        let channel = makeChannel(id: "ch1", name: "Channel One")
+        await engine.setup(channels: [channel], streams: [makeStream(channel: "ch1")])
+
+        let result = await engine.getChannel(id: "ch1")
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.id, "ch1")
+
+        let nilResult = await engine.getChannel(id: "none")
+        XCTAssertNil(nilResult)
+    }
 }

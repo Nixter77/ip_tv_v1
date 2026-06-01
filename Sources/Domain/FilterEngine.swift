@@ -18,9 +18,16 @@ public protocol ChannelFilterEngineProtocol: Sendable {
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>?
     ) async -> [Channel]
     
+    /// Получить список каналов по их ID (O(M) где M - количество запрашиваемых ID)
+    func getChannels(ids: [String]) async -> [Channel]
+
+    /// Получить один канал по ID (O(1))
+    func getChannel(id: String) async -> Channel?
+
     /// Получить все доступные потоки для конкретного канала
     func streams(for channelId: String) async -> [Stream]
 }
@@ -156,28 +163,37 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     ///   - category: Выбранная категория
     ///   - country: Выбранная страна
     ///   - language: Выбранный язык
+    ///   - matchingIds: Опциональный набор ID, которыми должен быть ограничен результат (напр. Избранное)
     /// - Returns: Список отфильтрованных и отсортированных каналов
     public func filter(
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>? = nil
     ) async -> [Channel] {
         // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
         let hasFilters = (query != nil && !query!.isEmpty) ||
                          (category != nil && !category!.isEmpty) ||
                          (country != nil && !country!.isEmpty) ||
-                         (language != nil && !language!.isEmpty)
+                         (language != nil && !language!.isEmpty) ||
+                         matchingIds != nil
 
         if !hasFilters {
             return allChannelsSorted
         }
 
-        var resultSet: Set<String>? = nil
+        var resultSet: Set<String>? = matchingIds
         
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
-            resultSet = channelsByCategory[category.lowercased()] ?? []
+            let categorySet = channelsByCategory[category.lowercased()] ?? []
+            if var current = resultSet {
+                current.formIntersection(categorySet)
+                resultSet = current
+            } else {
+                resultSet = categorySet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
@@ -219,7 +235,6 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                 if let range = findTokenRange(startingWith: token) {
                     for index in range {
                         // Оптимизация: используем прямой доступ к кэшированным наборам ID по индексу (O(1))
-                        // Это быстрее, чем lookup в словаре channelIdsByNameToken[sortedTokens[index]]
                         let ids = tokenSets[index]
                         matchesForToken.formUnion(ids)
                     }
@@ -251,7 +266,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             if resultSet?.isEmpty == true { return [] }
         }
         
-        // Если никакие фильтры не применялись
+        // Если никакие фильтры не применялись (случай когда был только matchingIds и он пуст handled выше)
         guard let finalIds = resultSet else {
             return allChannelsSorted
         }
@@ -259,6 +274,16 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         // Оптимизация: вместо compactMap + sorted (O(M log M)),
         // фильтруем уже отсортированный массив всех каналов за O(N).
         return allChannelsSorted.filter { finalIds.contains($0.id) }
+    }
+
+    /// Получить список каналов по их ID (O(M) где M - количество запрашиваемых ID)
+    public func getChannels(ids: [String]) async -> [Channel] {
+        return ids.compactMap { channels[$0] }
+    }
+
+    /// Получить один канал по ID (O(1))
+    public func getChannel(id: String) async -> Channel? {
+        return channels[id]
     }
 
     /// Получить все доступные потоки для конкретного канала

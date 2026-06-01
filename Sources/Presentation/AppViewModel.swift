@@ -79,19 +79,30 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
-        Publishers.CombineLatest3(
+        // Основной пайплайн: поиск и смена вкладок
+        Publishers.CombineLatest(
             $searchQuery
                 .removeDuplicates()
                 .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
             $selectedTab
-                .removeDuplicates(),
-            $favoriteIds
                 .removeDuplicates()
         )
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
+            .sink { [weak self] _, _ in
                 Task {
                     await self?.updateFilteredChannels()
+                }
+            }
+            .store(in: &cancellables)
+
+        // Оптимизация: Обновляем список только если мы на вкладке Избранное
+        $favoriteIds
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self, self.selectedTab == .favorites else { return }
+                Task {
+                    await self.updateFilteredChannels()
                 }
             }
             .store(in: &cancellables)
@@ -147,6 +158,7 @@ public final class AppViewModel: ObservableObject {
         var categoryFilter: String?
         var countryFilter: String?
         var languageFilter: String?
+        var matchingIds: Set<String>?
         
         switch selectedTab {
         case .all:
@@ -158,24 +170,34 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
+            matchingIds = favoriteIds
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+            // Оптимизация для Истории:
+            if searchQuery.isEmpty {
+                // Если поиска нет, просто загружаем каналы по ID из истории (сохраняя порядок)
+                self.filteredChannels = await filterEngine.getChannels(ids: historyIds)
+                return
+            } else {
+                // Если есть поиск, фильтруем только внутри ID истории
+                matchingIds = Set(historyIds)
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
         }
         
-        self.filteredChannels = await filterEngine.filter(
+        let results = await filterEngine.filter(
             query: searchQuery,
             category: categoryFilter,
             country: countryFilter,
-            language: languageFilter
+            language: languageFilter,
+            matchingIds: matchingIds
         )
+
+        // Для истории восстанавливаем порядок просмотра, если был применен поиск
+        if selectedTab == .history && !searchQuery.isEmpty {
+            let resultMap = results.reduce(into: [String: Channel]()) { $0[$1.id] = $1 }
+            self.filteredChannels = historyIds.compactMap { resultMap[$0] }
+        } else {
+            self.filteredChannels = results
+        }
     }
     
     /// Начать воспроизведение выбранного канала
@@ -187,14 +209,17 @@ public final class AppViewModel: ObservableObject {
     }
     
     /// Переключение флага избранного канала с персистентным сохранением
-    public func toggleFavorite(channelId: String) {
+    /// - Parameter channel: Канал для переключения
+    public func toggleFavorite(channel: Channel) {
+        let channelId = channel.id
         if favoriteIds.contains(channelId) {
             favoriteIds.remove(channelId)
             updatePersistedFavorite(channelId: channelId, name: "", isFavorite: false)
         } else {
             favoriteIds.insert(channelId)
-            let channelName = filteredChannels.first(where: { $0.id == channelId })?.name ?? "Канал"
-            updatePersistedFavorite(channelId: channelId, name: channelName, isFavorite: true)
+            // Используем переданный объект канала для синхронного сохранения,
+            // исключая race conditions от асинхронных lookup-ов в Task.
+            updatePersistedFavorite(channelId: channelId, name: channel.name, isFavorite: true)
         }
     }
     
