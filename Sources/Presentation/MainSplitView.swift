@@ -104,9 +104,12 @@ public struct MainSplitView: View {
                     Label("Избранное", systemImage: "heart.fill")
                         .foregroundColor(.pink)
                 }
+                .badge(viewModel.favoriteIds.count)
+
                 NavigationLink(value: SidebarTab.history) {
                     Label("История", systemImage: "clock.arrow.circlepath")
                 }
+                .badge(viewModel.historyIds.count)
             }
             
             if !viewModel.categories.isEmpty {
