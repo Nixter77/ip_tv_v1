@@ -139,6 +139,20 @@ final class AppViewModelTests: XCTestCase {
         let streams = await engine.streams(for: channel.id)
         XCTAssertEqual(player.state, .loading(stream: streams.first!))
     }
+
+    /// Тест: toggleFavorite корректно обновляет favoriteIds
+    func test_toggleFavorite() async throws {
+        let vm = try XCTUnwrap(viewModel)
+        let channel = Channel(id: "test", name: "Test", country: nil, languages: [], categories: [], logo: nil, website: nil)
+
+        XCTAssertFalse(vm.favoriteIds.contains("test"))
+
+        vm.toggleFavorite(channel: channel)
+        XCTAssertTrue(vm.favoriteIds.contains("test"))
+
+        vm.toggleFavorite(channel: channel)
+        XCTAssertFalse(vm.favoriteIds.contains("test"))
+    }
 }
 
 #endif

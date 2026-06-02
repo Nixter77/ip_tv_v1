@@ -151,4 +151,43 @@ final class ChannelFilterEngineTests: XCTestCase {
         XCTAssertLessThan(filterDuration, 0.080, "Filter duration must be under 80ms in Debug mode")
         XCTAssertFalse(filtered.isEmpty)
     }
+
+    /// Тест: фильтрация с ограничением по ID (matchingIds)
+    func test_filterWithMatchingIds() async {
+        let channels = [
+            makeChannel(id: "1", name: "Alpha"),
+            makeChannel(id: "2", name: "Beta"),
+            makeChannel(id: "3", name: "Gamma")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        // Должны вернуться только Alpha и Beta, так как Gamma нет в matchingIds
+        let filtered = await engine.filter(query: nil, category: nil, country: nil, language: nil, matchingIds: ["1", "2"])
+        XCTAssertEqual(filtered.count, 2)
+        XCTAssertTrue(filtered.contains { $0.id == "1" })
+        XCTAssertTrue(filtered.contains { $0.id == "2" })
+        XCTAssertFalse(filtered.contains { $0.id == "3" })
+
+        // Поиск в подмножестве: "a" в ["1", "2"] -> только Alpha
+        let searched = await engine.filter(query: "a", category: nil, country: nil, language: nil, matchingIds: ["1", "2"])
+        XCTAssertEqual(searched.count, 1)
+        XCTAssertEqual(searched.first?.id, "1")
+    }
+
+    /// Тест: получение каналов по списку ID (getChannels)
+    func test_getChannelsByIds() async {
+        let channels = [
+            makeChannel(id: "1", name: "Alpha"),
+            makeChannel(id: "2", name: "Beta"),
+            makeChannel(id: "3", name: "Gamma")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        let result = await engine.getChannels(ids: ["3", "1"])
+        XCTAssertEqual(result.count, 2)
+        XCTAssertTrue(result.contains { $0.id == "1" })
+        XCTAssertTrue(result.contains { $0.id == "3" })
+    }
 }

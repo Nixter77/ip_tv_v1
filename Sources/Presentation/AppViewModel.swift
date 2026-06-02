@@ -158,15 +158,33 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
+            // Оптимизация: используем matchingIds для сужения области поиска в движке
+            self.filteredChannels = await filterEngine.filter(
+                query: searchQuery,
+                category: nil,
+                country: nil,
+                language: nil,
+                matchingIds: favoriteIds
+            )
             return
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+            // Оптимизация: если поиска нет, просто загружаем каналы по ID (O(K))
+            if searchQuery.isEmpty {
+                let historyChannels = await filterEngine.getChannels(ids: historyIds)
+                let channelMap = historyChannels.reduce(into: [String: Channel](minimumCapacity: historyChannels.count)) { $0[$1.id] = $1 }
+                self.filteredChannels = historyIds.compactMap { channelMap[$0] }
+            } else {
+                // Если есть поиск, фильтруем подмножество истории
+                let filteredHistory = await filterEngine.filter(
+                    query: searchQuery,
+                    category: nil,
+                    country: nil,
+                    language: nil,
+                    matchingIds: Set(historyIds)
+                )
+                let channelMap = filteredHistory.reduce(into: [String: Channel](minimumCapacity: filteredHistory.count)) { $0[$1.id] = $1 }
+                self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             return
         }
         
@@ -187,14 +205,15 @@ public final class AppViewModel: ObservableObject {
     }
     
     /// Переключение флага избранного канала с персистентным сохранением
-    public func toggleFavorite(channelId: String) {
+    /// - Parameter channel: Полный объект канала (предотвращает O(N) поиск в списке для получения имени)
+    public func toggleFavorite(channel: Channel) {
+        let channelId = channel.id
         if favoriteIds.contains(channelId) {
             favoriteIds.remove(channelId)
-            updatePersistedFavorite(channelId: channelId, name: "", isFavorite: false)
+            updatePersistedFavorite(channelId: channelId, name: channel.name, isFavorite: false)
         } else {
             favoriteIds.insert(channelId)
-            let channelName = filteredChannels.first(where: { $0.id == channelId })?.name ?? "Канал"
-            updatePersistedFavorite(channelId: channelId, name: channelName, isFavorite: true)
+            updatePersistedFavorite(channelId: channelId, name: channel.name, isFavorite: true)
         }
     }
     
