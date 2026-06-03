@@ -100,4 +100,32 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_handlesHybridUrls() {
+        // Test case for hybrid URLs where both path and query contain sensitive info
+        let hybridUrl = "http://server/auth=secret/play?token=abc"
+        let masked = Stream.mask(hybridUrl)
+
+        XCTAssertTrue(masked.contains("auth=****"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
+
+    func test_appViewModel_limitsSearchQueryLength() async {
+        // Note: AppViewModel uses @MainActor
+        let vm = await AppViewModel(
+            repository: IPTVRepository(),
+            filterEngine: ChannelFilterEngine(),
+            playerManager: PlayerStateManager()
+        )
+
+        let longQuery = String(repeating: "a", count: 1000)
+        await MainActor.run {
+            vm.searchQuery = longQuery
+        }
+
+        let currentQuery = await vm.searchQuery
+        XCTAssertEqual(currentQuery.count, 512)
+    }
 }

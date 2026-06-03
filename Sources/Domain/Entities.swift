@@ -111,7 +111,7 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         }
 
         // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in
