@@ -57,7 +57,7 @@ final class ChannelFilterEngineTests: XCTestCase {
         
         await engine.setup(channels: channels, streams: streams)
         
-        let filtered = await engine.filter(query: nil, category: nil, country: "US", language: "eng")
+        let filtered = await engine.filter(query: nil, category: nil, country: "US", language: "eng", matchingIds: nil)
         
         XCTAssertEqual(filtered.count, 1)
         XCTAssertEqual(filtered.first?.id, "us.eng.news")
@@ -75,7 +75,7 @@ final class ChannelFilterEngineTests: XCTestCase {
         await engine.setup(channels: channels, streams: streams)
         
         // Поиск "new" должен вернуть "CNN Newsline" и "Sky News" (так как "Newsline" и "News" начинаются с "new")
-        let filtered = await engine.filter(query: "new", category: nil, country: nil, language: nil)
+        let filtered = await engine.filter(query: "new", category: nil, country: nil, language: nil, matchingIds: nil)
         
         XCTAssertEqual(filtered.count, 2)
         let ids = Set(filtered.map { $0.id })
@@ -95,12 +95,12 @@ final class ChannelFilterEngineTests: XCTestCase {
         await engine.setup(channels: channels, streams: streams)
         
         // Поиск "ct" должен найти "ČT 1"
-        let filteredCT = await engine.filter(query: "ct", category: nil, country: nil, language: nil)
+        let filteredCT = await engine.filter(query: "ct", category: nil, country: nil, language: nil, matchingIds: nil)
         XCTAssertEqual(filteredCT.count, 1)
         XCTAssertEqual(filteredCT.first?.id, "ct1")
         
         // Поиск "rte" должен найти "RTÉ One"
-        let filteredRTE = await engine.filter(query: "rte", category: nil, country: nil, language: nil)
+        let filteredRTE = await engine.filter(query: "rte", category: nil, country: nil, language: nil, matchingIds: nil)
         XCTAssertEqual(filteredRTE.count, 1)
         XCTAssertEqual(filteredRTE.first?.id, "rte")
     }
@@ -141,7 +141,8 @@ final class ChannelFilterEngineTests: XCTestCase {
             query: "space",
             category: "news",
             country: "US",
-            language: "eng"
+            language: "eng",
+            matchingIds: nil
         )
         let filterDuration = CFAbsoluteTimeGetCurrent() - filterStart
         

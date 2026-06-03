@@ -270,7 +270,7 @@ public struct MainSplitView: View {
                         channel: channel,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
                         onFavoriteToggle: {
-                            viewModel.toggleFavorite(channelId: channel.id)
+                            viewModel.toggleFavorite(channel)
                         }
                     )
                     .tag(channel)
@@ -399,7 +399,7 @@ public struct MainSplitView: View {
                         .accessibilityLabel("Во весь экран")
                         
                         Button(action: {
-                            viewModel.toggleFavorite(channelId: channel.id)
+                            viewModel.toggleFavorite(channel)
                         }) {
                             Image(systemName: viewModel.favoriteIds.contains(channel.id) ? "heart.fill" : "heart")
                                 .font(.title2)

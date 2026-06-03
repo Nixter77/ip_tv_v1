@@ -96,7 +96,7 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(vm.countries.count, 1)
         XCTAssertEqual(vm.languages.count, 1)
         
-        let channels = await engine.filter(query: nil, category: nil, country: nil, language: nil)
+        let channels = await engine.filter(query: nil, category: nil, country: nil, language: nil, matchingIds: nil)
         XCTAssertEqual(channels.count, 1)
     }
 
