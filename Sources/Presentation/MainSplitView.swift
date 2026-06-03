@@ -104,9 +104,12 @@ public struct MainSplitView: View {
                     Label("Избранное", systemImage: "heart.fill")
                         .foregroundColor(.pink)
                 }
+                .badge(viewModel.favoriteIds.count)
+
                 NavigationLink(value: SidebarTab.history) {
                     Label("История", systemImage: "clock.arrow.circlepath")
                 }
+                .badge(viewModel.historyIds.count)
             }
             
             if !viewModel.categories.isEmpty {
@@ -268,6 +271,7 @@ public struct MainSplitView: View {
                 List(viewModel.filteredChannels, id: \.id, selection: $selectedChannel) { channel in
                     ChannelRowView(
                         channel: channel,
+                        isPlaying: viewModel.playerManager.currentChannel?.id == channel.id,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
                         onFavoriteToggle: {
                             viewModel.toggleFavorite(channelId: channel.id)
@@ -439,6 +443,7 @@ public struct MainSplitView: View {
 // MARK: - Строка Списка Каналов (ChannelRowView)
 struct ChannelRowView: View {
     let channel: Channel
+    let isPlaying: Bool
     let isFavorite: Bool
     let onFavoriteToggle: () -> Void
     
@@ -476,9 +481,18 @@ struct ChannelRowView: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(channel.name)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(channel.name)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                        .help(channel.name)
+
+                    if isPlaying {
+                        Image(systemName: "waveform")
+                            .symbolEffect(.variableColor.iterative.reversing, options: .repeating)
+                            .foregroundColor(.blue)
+                    }
+                }
                 
                 HStack(spacing: 8) {
                     if let country = channel.country {
