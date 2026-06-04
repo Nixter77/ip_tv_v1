@@ -18,8 +18,12 @@ public protocol ChannelFilterEngineProtocol: Sendable {
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>?
     ) async -> [Channel]
+
+    /// Получить конкретные каналы по их ID (O(1) за канал)
+    func getChannels(ids: [String]) async -> [Channel]
     
     /// Получить все доступные потоки для конкретного канала
     func streams(for channelId: String) async -> [Stream]
@@ -156,12 +160,14 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     ///   - category: Выбранная категория
     ///   - country: Выбранная страна
     ///   - language: Выбранный язык
+    ///   - matchingIds: Опциональное подмножество ID для фильтрации
     /// - Returns: Список отфильтрованных и отсортированных каналов
     public func filter(
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>? = nil
     ) async -> [Channel] {
         // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
         let hasFilters = (query != nil && !query!.isEmpty) ||
@@ -169,15 +175,21 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                          (country != nil && !country!.isEmpty) ||
                          (language != nil && !language!.isEmpty)
 
-        if !hasFilters {
+        if !hasFilters && matchingIds == nil {
             return allChannelsSorted
         }
 
-        var resultSet: Set<String>? = nil
+        var resultSet: Set<String>? = matchingIds
         
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
-            resultSet = channelsByCategory[category.lowercased()] ?? []
+            let categorySet = channelsByCategory[category.lowercased()] ?? []
+            if var current = resultSet {
+                current.formIntersection(categorySet)
+                resultSet = current
+            } else {
+                resultSet = categorySet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
@@ -259,6 +271,11 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         // Оптимизация: вместо compactMap + sorted (O(M log M)),
         // фильтруем уже отсортированный массив всех каналов за O(N).
         return allChannelsSorted.filter { finalIds.contains($0.id) }
+    }
+
+    /// Получить конкретные каналы по их ID (O(1) за канал)
+    public func getChannels(ids: [String]) async -> [Channel] {
+        return ids.compactMap { channels[$0] }
     }
 
     /// Получить все доступные потоки для конкретного канала
