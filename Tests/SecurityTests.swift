@@ -100,4 +100,21 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_maskedUrlString_masksHybridUrls() {
+        // Test URL that has sensitive tokens in BOTH path segments and query parameters
+        let stream = Stream(
+            channel: "test",
+            urlString: "https://example.com/api/token=secret-path/play?key=secret-query",
+            status: nil,
+            timeshift: nil,
+            httpReferrer: nil
+        )
+
+        let masked = stream.maskedUrlString
+        XCTAssertTrue(masked.contains("/token=****"))
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertFalse(masked.contains("secret-path"))
+        XCTAssertFalse(masked.contains("secret-query"))
+    }
 }
