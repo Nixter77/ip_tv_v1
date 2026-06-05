@@ -7,3 +7,8 @@
 **Vulnerability:** URLs with unencoded spaces or special characters caused `URLComponents` parsing to fail, bypassing the sensitive data masking logic and leaking raw tokens in the UI.
 **Learning:** IPTV stream URLs often contain "dirty" data (unencoded spaces). `URLComponents` is strict and returns `nil` if parsing fails, so masking must handle pre-encoding to ensure robustness.
 **Prevention:** Always attempt to encode the URL string with a robust character set (including `#` for fragments) if initial parsing fails in masking or URL creation logic, ensuring that sensitive components can still be identified and redacted without breaking functionality.
+
+## 2024-05-30 - [Hybrid Token Masking and Input Length Limits]
+**Vulnerability:** Path-based tokens in URLs were being leaked if query parameters were also present, and the search input was vulnerable to resource exhaustion DoS.
+**Learning:** Security filters must apply sanitization passes (path, query, credentials, fragment) independently rather than conditionally to prevent leakage in hybrid URL structures. Input limits should be enforced as close to the source as possible (e.g., in the ViewModel).
+**Prevention:** Ensure masking logic evaluates all potential sensitive components of a URL independently. Implement strict length limits on all user-controlled inputs to prevent resource exhaustion attacks.

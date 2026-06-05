@@ -27,7 +27,13 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
     @Published public var searchQuery: String = "" {
-        didSet { saveSearchQuery() }
+        didSet {
+            // Security: Limit search query length to prevent DoS or resource exhaustion
+            if searchQuery.count > 512 {
+                searchQuery = String(searchQuery.prefix(512))
+            }
+            saveSearchQuery()
+        }
     }
     @Published public var selectedTab: SidebarTab = .all {
         didSet { saveSelectedTab() }

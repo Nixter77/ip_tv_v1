@@ -100,4 +100,29 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_masksBothPathAndQuery() {
+        let hybridUrl = "http://example.com/stream/key=secret?token=abc"
+        let masked = Stream.mask(hybridUrl)
+
+        XCTAssertTrue(masked.contains("/key=****"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
+
+    @MainActor
+    func test_appViewModel_limitsSearchQueryLength() {
+        // This test verifies the DoS protection in AppViewModel
+        let mockRepo = IPTVRepository()
+        let mockEngine = ChannelFilterEngine()
+        let mockPlayer = PlayerStateManager()
+        let viewModel = AppViewModel(repository: mockRepo, filterEngine: mockEngine, playerManager: mockPlayer)
+
+        let longQuery = String(repeating: "a", count: 1000)
+        viewModel.searchQuery = longQuery
+
+        XCTAssertEqual(viewModel.searchQuery.count, 512)
+        XCTAssertTrue(longQuery.hasPrefix(viewModel.searchQuery))
+    }
 }
