@@ -151,4 +151,50 @@ final class ChannelFilterEngineTests: XCTestCase {
         XCTAssertLessThan(filterDuration, 0.080, "Filter duration must be under 80ms in Debug mode")
         XCTAssertFalse(filtered.isEmpty)
     }
+
+    /// Тест: Subset Pruning - поиск только внутри заданного набора ID
+    func test_subsetPruning() async {
+        let channels = [
+            makeChannel(id: "c1", name: "Apple"),
+            makeChannel(id: "c2", name: "Apricot"),
+            makeChannel(id: "c3", name: "Banana")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        // Поиск "Ap" должен найти "Apple" и "Apricot"
+        let normalSearch = await engine.filter(query: "Ap", category: nil, country: nil, language: nil)
+        XCTAssertEqual(normalSearch.count, 2)
+
+        // Subset Pruning: Ищем "Ap" только в ["c2", "c3"]
+        let subsetSearch = await engine.filter(
+            query: "Ap",
+            category: nil,
+            country: nil,
+            language: nil,
+            matchingIds: ["c2", "c3"]
+        )
+        // Должен найтись только "Apricot", так как "Banana" не подходит по тексту, а "Apple" не в matchingIds
+        XCTAssertEqual(subsetSearch.count, 1)
+        XCTAssertEqual(subsetSearch.first?.id, "c2")
+    }
+
+    /// Тест: getChannels сохраняет порядок и работает эффективно
+    func test_getChannelsPreservesOrder() async {
+        let channels = [
+            makeChannel(id: "a", name: "Alpha"),
+            makeChannel(id: "b", name: "Beta"),
+            makeChannel(id: "c", name: "Gamma")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        let ids = ["c", "a", "b"]
+        let results = await engine.getChannels(ids: ids)
+
+        XCTAssertEqual(results.count, 3)
+        XCTAssertEqual(results[0].id, "c")
+        XCTAssertEqual(results[1].id, "a")
+        XCTAssertEqual(results[2].id, "b")
+    }
 }
