@@ -18,11 +18,31 @@ public protocol ChannelFilterEngineProtocol: Sendable {
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>?
     ) async -> [Channel]
     
     /// Получить все доступные потоки для конкретного канала
     func streams(for channelId: String) async -> [Stream]
+
+    /// Получить каналы по списку ID (сохраняя порядок)
+    func getChannels(ids: [String]) async -> [Channel]
+
+    /// Получить один канал по ID
+    func getChannel(id: String) async -> Channel?
+}
+
+public extension ChannelFilterEngineProtocol {
+    /// Реализация по умолчанию для обеспечения обратной совместимости
+    func filter(
+        query: String? = nil,
+        category: String? = nil,
+        country: String? = nil,
+        language: String? = nil,
+        matchingIds: Set<String>? = nil
+    ) async -> [Channel] {
+        return await filter(query: query, category: category, country: country, language: language, matchingIds: matchingIds)
+    }
 }
 
 /// Высокопроизводительная реализация ChannelFilterEngine в виде Swift Actor.
@@ -156,28 +176,37 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     ///   - category: Выбранная категория
     ///   - country: Выбранная страна
     ///   - language: Выбранный язык
+    ///   - matchingIds: Опциональный набор ID для предварительной фильтрации (Subset Pruning)
     /// - Returns: Список отфильтрованных и отсортированных каналов
     public func filter(
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>? = nil
     ) async -> [Channel] {
         // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
         let hasFilters = (query != nil && !query!.isEmpty) ||
                          (category != nil && !category!.isEmpty) ||
                          (country != nil && !country!.isEmpty) ||
-                         (language != nil && !language!.isEmpty)
+                         (language != nil && !language!.isEmpty) ||
+                         (matchingIds != nil)
 
         if !hasFilters {
             return allChannelsSorted
         }
 
-        var resultSet: Set<String>? = nil
+        var resultSet: Set<String>? = matchingIds
         
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
-            resultSet = channelsByCategory[category.lowercased()] ?? []
+            let categorySet = channelsByCategory[category.lowercased()] ?? []
+            if var current = resultSet {
+                current.formIntersection(categorySet)
+                resultSet = current
+            } else {
+                resultSet = categorySet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
@@ -266,5 +295,19 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     /// - Returns: Список потоков
     public func streams(for channelId: String) async -> [Stream] {
         return activeStreams[channelId] ?? []
+    }
+
+    /// Получить каналы по списку ID (сохраняя порядок)
+    /// - Parameter ids: Список идентификаторов
+    /// - Returns: Список найденных каналов
+    public func getChannels(ids: [String]) async -> [Channel] {
+        return ids.compactMap { channels[$0] }
+    }
+
+    /// Получить один канал по ID
+    /// - Parameter id: Идентификатор канала
+    /// - Returns: Канал, если найден
+    public func getChannel(id: String) async -> Channel? {
+        return channels[id]
     }
 }

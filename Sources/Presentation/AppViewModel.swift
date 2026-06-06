@@ -5,6 +5,12 @@ import SwiftUI
 import Combine
 import SwiftData
 
+private extension String {
+    func foldedForSearch() -> String {
+        return self.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+    }
+}
+
 /// Состояния загрузки данных приложения
 public enum AppLoadingState: Equatable {
     case loading
@@ -158,15 +164,16 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
+            self.filteredChannels = await filterEngine.filter(query: searchQuery, matchingIds: favoriteIds)
             return
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+            let channels = await filterEngine.getChannels(ids: historyIds)
+            if !searchQuery.isEmpty {
+                let foldedQuery = searchQuery.foldedForSearch()
+                self.filteredChannels = channels.filter { $0.name.foldedForSearch().contains(foldedQuery) }
+            } else {
+                self.filteredChannels = channels
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             return
         }
         
