@@ -100,4 +100,15 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_masksPathBasedTokensWithQueryParameters() {
+        // Test that path segments containing '=' are masked even when query items are present
+        let url = "https://example.com/key=123/stream.m3u8?token=abc"
+        let masked = Stream.mask(url)
+
+        XCTAssertTrue(masked.contains("/key=****/"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
 }
