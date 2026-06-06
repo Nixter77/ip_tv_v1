@@ -268,6 +268,7 @@ public struct MainSplitView: View {
                 List(viewModel.filteredChannels, id: \.id, selection: $selectedChannel) { channel in
                     ChannelRowView(
                         channel: channel,
+                        isPlaying: viewModel.playerManager.currentChannel?.id == channel.id,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
                         onFavoriteToggle: {
                             viewModel.toggleFavorite(channelId: channel.id)
@@ -439,6 +440,7 @@ public struct MainSplitView: View {
 // MARK: - Строка Списка Каналов (ChannelRowView)
 struct ChannelRowView: View {
     let channel: Channel
+    let isPlaying: Bool
     let isFavorite: Bool
     let onFavoriteToggle: () -> Void
     
@@ -447,31 +449,45 @@ struct ChannelRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             // Логотип с AsyncImage и кастомным Gradient Placeholder
-            AsyncImage(url: channel.logo.flatMap { URL(string: $0) }) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+            ZStack(alignment: .bottomTrailing) {
+                AsyncImage(url: channel.logo.flatMap { URL(string: $0) }) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 44, height: 44)
+                            .cornerRadius(6)
+                            .accessibilityLabel("Логотип канала \(channel.name)")
+                    default:
+                        // Красивый градиентный плейсхолдер с первой буквой канала
+                        ZStack {
+                            LinearGradient(
+                                colors: [Color.blue.opacity(0.7), Color.purple.opacity(0.7)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            Text(String(channel.name.prefix(1)).uppercased())
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .fontWeight(.bold)
+                        }
                         .frame(width: 44, height: 44)
                         .cornerRadius(6)
-                        .accessibilityLabel("Логотип канала \(channel.name)")
-                default:
-                    // Красивый градиентный плейсхолдер с первой буквой канала
-                    ZStack {
-                        LinearGradient(
-                            colors: [Color.blue.opacity(0.7), Color.purple.opacity(0.7)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        Text(String(channel.name.prefix(1)).uppercased())
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .fontWeight(.bold)
+                        .accessibilityLabel("Логотип \(channel.name) отсутствует")
                     }
-                    .frame(width: 44, height: 44)
-                    .cornerRadius(6)
-                    .accessibilityLabel("Логотип \(channel.name) отсутствует")
+                }
+
+                if isPlaying {
+                    Image(systemName: "waveform")
+                        .symbolEffect(.variableColor.iterative, options: .repeating)
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(4)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                        .foregroundColor(.blue)
+                        .offset(x: 4, y: 4)
+                        .accessibilityLabel("Воспроизводится")
                 }
             }
             
@@ -479,6 +495,7 @@ struct ChannelRowView: View {
                 Text(channel.name)
                     .fontWeight(.medium)
                     .lineLimit(1)
+                    .help(channel.name)
                 
                 HStack(spacing: 8) {
                     if let country = channel.country {
