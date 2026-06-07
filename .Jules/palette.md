@@ -13,3 +13,7 @@
 ## 2026-05-31 - [Native macOS Interactions and Layout Stability]
 **Learning:** For macOS-native SwiftUI apps, favor `.opacity(isVisible ? 1 : 0)` over conditional rendering for interactive elements in rows to prevent layout jumps during hover and keep elements accessible. Implementing `.contextMenu` for secondary actions like "Copy Name" or "Toggle Favorite" improves desktop-native feel and discoverability.
 **Action:** Use `.opacity` for stable hover buttons and provide context menus for row-based actions.
+
+## 2026-06-01 - [Animated Playback Indicators for Active State]
+**Learning:** In media lists, a static selection color is often insufficient to indicate active playback, especially if the user navigates away from the currently playing item. An animated waveform icon (using native `.symbolEffect`) provides a high-delight, low-friction way to signal the active stream while maintaining accessibility with proper labels.
+**Action:** Use `.symbolEffect(.variableColor.iterative, options: .repeating)` on SF Symbols like 'waveform' for native-feeling animated status indicators.

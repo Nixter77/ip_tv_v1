@@ -268,6 +268,7 @@ public struct MainSplitView: View {
                 List(viewModel.filteredChannels, id: \.id, selection: $selectedChannel) { channel in
                     ChannelRowView(
                         channel: channel,
+                        isPlaying: viewModel.playerManager.currentChannel?.id == channel.id,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
                         onFavoriteToggle: {
                             viewModel.toggleFavorite(channelId: channel.id)
@@ -439,6 +440,7 @@ public struct MainSplitView: View {
 // MARK: - Строка Списка Каналов (ChannelRowView)
 struct ChannelRowView: View {
     let channel: Channel
+    let isPlaying: Bool
     let isFavorite: Bool
     let onFavoriteToggle: () -> Void
     
@@ -476,9 +478,19 @@ struct ChannelRowView: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(channel.name)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(channel.name)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+
+                    if isPlaying {
+                        Image(systemName: "waveform")
+                            .symbolEffect(.variableColor.iterative, options: .repeating)
+                            .foregroundColor(.accentColor)
+                            .font(.caption)
+                            .accessibilityLabel("Воспроизводится")
+                    }
+                }
                 
                 HStack(spacing: 8) {
                     if let country = channel.country {
