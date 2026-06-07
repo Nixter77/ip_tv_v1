@@ -100,4 +100,31 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_maskedUrlString_handlesHybridPathAndQuery() {
+        // Test that both path segments and query parameters are masked
+        let hybridUrl = "https://example.com/auth=secret/stream.m3u8?key=123"
+        let masked = Stream.mask(hybridUrl)
+
+        XCTAssertTrue(masked.contains("/auth=****"))
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("123"))
+    }
+
+    #if canImport(Combine) && canImport(SwiftData)
+    @MainActor
+    func test_appViewModel_limitsSearchQueryLength() {
+        let mockRepo = ChannelRepositoryTests.MockRepository()
+        let mockFilter = ChannelFilterEngine()
+        let mockPlayer = PlayerStateManager()
+        let viewModel = AppViewModel(repository: mockRepo, filterEngine: mockFilter, playerManager: mockPlayer)
+
+        let longQuery = String(repeating: "a", count: 1000)
+        viewModel.searchQuery = longQuery
+
+        XCTAssertEqual(viewModel.searchQuery.count, 512)
+        XCTAssertEqual(viewModel.searchQuery, String(longQuery.prefix(512)))
+    }
+    #endif
 }
