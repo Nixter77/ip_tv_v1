@@ -13,3 +13,7 @@
 ## 2026-05-31 - [Native macOS Interactions and Layout Stability]
 **Learning:** For macOS-native SwiftUI apps, favor `.opacity(isVisible ? 1 : 0)` over conditional rendering for interactive elements in rows to prevent layout jumps during hover and keep elements accessible. Implementing `.contextMenu` for secondary actions like "Copy Name" or "Toggle Favorite" improves desktop-native feel and discoverability.
 **Action:** Use `.opacity` for stable hover buttons and provide context menus for row-based actions.
+
+## 2026-06-01 - [Visual Feedback for Active State and Collection Sizes]
+**Learning:** In multi-pane navigation apps, users benefit from immediate visual feedback about both the size of their collections (via badges) and the current active process (via animated indicators in lists). Using native `.badge()` and `.symbolEffect` provides a high-quality, OS-integrated feel.
+**Action:** Implement `.badge` for sidebar item counts and use animated SF Symbols (like `waveform`) with accessibility labels to indicate active state in lists.
