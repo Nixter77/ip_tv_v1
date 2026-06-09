@@ -25,7 +25,8 @@ struct IPTVApp: App {
         do {
             modelContainer = try ModelContainer(for: PersistedChannel.self)
         } catch {
-            print("Не удалось инициализировать SwiftData контейнер: \(error.localizedDescription)")
+            let errorMsg = Stream.maskURLs(in: error.localizedDescription)
+            print("Не удалось инициализировать SwiftData контейнер: \(errorMsg)")
         }
         
         _viewModel = StateObject(wrappedValue: AppViewModel(

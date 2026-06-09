@@ -51,10 +51,11 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
     public let timeshift: Int?
     public let httpReferrer: String?
 
-    /// Allowed characters for IPTV URL robust parsing (including # fragment which is NOT in urlQueryAllowed)
+    /// Allowed characters for IPTV URL robust parsing (including # and ? which must be preserved during encoding)
     private static let iptvUrlAllowed: CharacterSet = {
         var allowed = CharacterSet.urlQueryAllowed
         allowed.insert("#")
+        allowed.insert("?")
         return allowed
     }()
 
@@ -110,8 +111,8 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
         }
 
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        // Some providers put token-like key=value data in path segments (even if query items are present).
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in
