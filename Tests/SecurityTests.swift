@@ -100,4 +100,37 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_masksPathSegmentsWithEquals_evenWithQuery() {
+        let url = "https://example.com/auth=secret/play?token=123"
+        let masked = Stream.mask(url)
+
+        XCTAssertTrue(masked.contains("/auth=****"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("123"))
+    }
+
+    func test_mask_fallbackRegex_masksSensitiveParams_inMalformedUrl() {
+        // A URL that is likely to fail standard parsing
+        let malformedUrl = "http://example.com/play?token=secret#data with spaces"
+        let masked = Stream.mask(malformedUrl)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("secret"))
+    }
+
+    @MainActor
+    func test_appViewModel_capsSearchQueryLength() {
+        let repo = IPTVRepository()
+        let engine = ChannelFilterEngine()
+        let player = PlayerStateManager()
+        let viewModel = AppViewModel(repository: repo, filterEngine: engine, playerManager: player)
+
+        let longQuery = String(repeating: "a", count: 1000)
+        viewModel.searchQuery = longQuery
+
+        XCTAssertEqual(viewModel.searchQuery.count, 512)
+        XCTAssertEqual(viewModel.searchQuery, String(longQuery.prefix(512)))
+    }
 }

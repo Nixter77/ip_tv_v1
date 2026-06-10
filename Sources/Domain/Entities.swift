@@ -93,8 +93,10 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
         guard var components = components, components.scheme != nil else {
             // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
-            // for common credential patterns to avoid returning a raw URL that might contain tokens.
-            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+            // for common credential patterns and sensitive parameters to avoid returning a raw URL that might contain tokens.
+            let masked = urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+            let sensitiveParams = #"(token|key|auth|session|pass|pwd|sid|uid)"#
+            return masked.replacingOccurrences(of: #"(?<=[?&/])"# + sensitiveParams + #"=[^&\s#]+"#, with: "$1=****", options: [.regularExpression, .caseInsensitive])
         }
 
         // Mask user credentials
@@ -111,7 +113,8 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         }
 
         // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        // Masking path segments containing '=' unconditionally for defense-in-depth.
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in

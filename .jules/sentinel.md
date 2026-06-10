@@ -7,3 +7,8 @@
 **Vulnerability:** URLs with unencoded spaces or special characters caused `URLComponents` parsing to fail, bypassing the sensitive data masking logic and leaking raw tokens in the UI.
 **Learning:** IPTV stream URLs often contain "dirty" data (unencoded spaces). `URLComponents` is strict and returns `nil` if parsing fails, so masking must handle pre-encoding to ensure robustness.
 **Prevention:** Always attempt to encode the URL string with a robust character set (including `#` for fragments) if initial parsing fails in masking or URL creation logic, ensuring that sensitive components can still be identified and redacted without breaking functionality.
+
+## 2026-06-10 - [Search Input DoS Protection]
+**Vulnerability:** Unbounded search input length could lead to resource exhaustion (DoS) as the `ChannelFilterEngine` processes large strings through multiple filtering stages and regex-like operations.
+**Learning:** Real-time filtering UI components must have input constraints to prevent malicious or accidental resource exhaustion, especially when using complex filtering logic or actors.
+**Prevention:** Implement character limits on user-controlled input fields at the ViewModel level using `didSet` or similar observers before the data reaches the processing engine.
