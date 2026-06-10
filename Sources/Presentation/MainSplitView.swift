@@ -104,9 +104,12 @@ public struct MainSplitView: View {
                     Label("Избранное", systemImage: "heart.fill")
                         .foregroundColor(.pink)
                 }
+                .badge(viewModel.favoriteIds.count)
+
                 NavigationLink(value: SidebarTab.history) {
                     Label("История", systemImage: "clock.arrow.circlepath")
                 }
+                .badge(viewModel.historyIds.count)
             }
             
             if !viewModel.categories.isEmpty {
@@ -269,6 +272,7 @@ public struct MainSplitView: View {
                     ChannelRowView(
                         channel: channel,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
+                        isPlaying: viewModel.playerManager.currentChannel?.id == channel.id,
                         onFavoriteToggle: {
                             viewModel.toggleFavorite(channelId: channel.id)
                         }
@@ -440,6 +444,7 @@ public struct MainSplitView: View {
 struct ChannelRowView: View {
     let channel: Channel
     let isFavorite: Bool
+    let isPlaying: Bool
     let onFavoriteToggle: () -> Void
     
     @State private var isHovered = false
@@ -497,6 +502,14 @@ struct ChannelRowView: View {
                 }
             }
             
+            if isPlaying {
+                Image(systemName: "waveform")
+                    .symbolEffect(.variableColor.iterative, options: .repeating)
+                    .foregroundColor(.blue)
+                    .help("Сейчас воспроизводится")
+                    .accessibilityLabel("Сейчас воспроизводится")
+            }
+
             Spacer()
             
             // Кнопка избранного, появляется при hover или если уже в избранном
