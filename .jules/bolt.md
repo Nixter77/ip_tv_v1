@@ -15,3 +15,7 @@
 ## 2024-05-31 - [Optimization] Debounced Search and Granular Persistence
 **Learning:** In SwiftUI ViewModels using Combine, chaining multiple state properties into a single pipeline can cause explosive redundant work. Debouncing and duplicate removal are essential for search inputs. Furthermore, coupling simple state persistence (strings) with complex state persistence (JSON) in a single method creates unnecessary encoding overhead.
 **Action:** Always debounce search inputs and use granular persistence methods to avoid expensive encoding for simple property changes.
+
+## 2024-06-01 - [Optimization] Subset Pruning & Chronological Reconstruction
+**Learning:** For features like 'Favorites' or 'History', passing the allowed ID set directly to the filter engine ('Subset Pruning') allows the engine to skip global index scans and perform much faster set intersections. Additionally, when reconstruction of chronological order is required (History), using a temporary dictionary for O(1) lookups of filtered results avoids O(N*M) complexity.
+**Action:** Always provide restricted ID sets to filter engines when searching within subsets, and use dictionary-based reconstruction for ordered list filtering.
