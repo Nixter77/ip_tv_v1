@@ -100,4 +100,22 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    @MainActor
+    func test_searchQuery_lengthLimit() {
+        let repository = IPTVRepository()
+        let filterEngine = ChannelFilterEngine()
+        let playerManager = PlayerStateManager()
+        let viewModel = AppViewModel(
+            repository: repository,
+            filterEngine: filterEngine,
+            playerManager: playerManager
+        )
+
+        let longQuery = String(repeating: "a", count: 1000)
+        viewModel.searchQuery = longQuery
+
+        XCTAssertEqual(viewModel.searchQuery.count, 512)
+        XCTAssertEqual(viewModel.searchQuery, String(repeating: "a", count: 512))
+    }
 }
