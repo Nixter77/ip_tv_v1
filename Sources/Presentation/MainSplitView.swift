@@ -287,131 +287,49 @@ public struct MainSplitView: View {
         }
     }
     
-    // MARK: - 3. Player Detail View
+    // MARK: - 3. Player Detail View (QuickTime стиль)
     private var playerDetailView: some View {
         ZStack {
-            Color(NSColor.windowBackgroundColor)
-            
+            Color.black
+
             if let channel = viewModel.playerManager.currentChannel {
-                VStack(spacing: 0) {
-                    // Видео-плеер
-                    if viewModel.isPlayerDetached {
-                        ZStack {
-                            Color.black.ignoresSafeArea()
-                            VStack(spacing: 16) {
-                                Image(systemName: "tv.and.mediabox")
-                                    .font(.system(size: 64))
-                                    .foregroundColor(.secondary)
-                                Text("Трансляция перенесена в отдельное окно")
-                                    .font(.title3)
-                                    .foregroundColor(.white)
-                                Button("Вернуть в главное окно") {
-                                    viewModel.isPlayerDetached = false
-                                    dismissWindow(id: "detached-player")
-                                }
-                                .buttonStyle(.borderedProminent)
-                            }
+                if viewModel.isPlayerDetached {
+                    VStack(spacing: 16) {
+                        Image(systemName: "tv.and.mediabox")
+                            .font(.system(size: 64))
+                            .foregroundColor(.secondary)
+                        Text("Трансляция перенесена в отдельное окно")
+                            .font(.title3)
+                            .foregroundColor(.white)
+                        Button("Вернуть в главное окно") {
+                            viewModel.isPlayerDetached = false
+                            dismissWindow(id: "detached-player")
                         }
-                    } else {
-                        ZStack {
-                            VideoPlayerView(player: viewModel.playerManager.avPlayer)
-                                .ignoresSafeArea()
-                            
-                            // Кастомный HUD оверлей при загрузке или ошибке
-                            PlayerHUDOverlay(state: viewModel.playerManager.state, onRetry: {
-                                Task {
-                                    await viewModel.play(channel: channel)
-                                }
-                            })
-                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    
-                    // Панель информации о канале
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(channel.name)
-                                .font(.title2)
-                                .fontWeight(.bold)
-                            
-                            HStack(spacing: 12) {
-                                if let country = channel.country {
-                                    Text("🌐 Страна: \(country)")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                                if !channel.categories.isEmpty {
-                                    Text("🏷️ \(channel.categories.joined(separator: ", "))")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        
-                        Spacer()
-                        
-                        // Регулятор битрейта (выбор качества)
-                        Picker("Качество", selection: Binding(
-                            get: { viewModel.playerManager.preferredBitrate },
-                            set: { viewModel.playerManager.preferredBitrate = $0 }
-                        )) {
-                            Text("Авто").tag(Double(0))
-                            Text("1080p (6 Mbps)").tag(Double(6_000_000))
-                            Text("720p (3 Mbps)").tag(Double(3_000_000))
-                            Text("480p (1.5 Mbps)").tag(Double(1_500_000))
-                            Text("360p (800 Kbps)").tag(Double(800_000))
-                            Text("240p (400 Kbps)").tag(Double(400_000))
-                        }
-                        .pickerStyle(.menu)
-                        .frame(width: 140)
-                        .padding(.trailing, 8)
-                        .help("Выбрать качество видео")
-                        .accessibilityLabel("Выбор качества видео")
-                        
-                        // Кнопка отсоединения плеера в отдельное окно
-                        if !viewModel.isPlayerDetached {
-                            Button(action: {
-                                viewModel.isPlayerDetached = true
-                                openWindow(id: "detached-player")
-                            }) {
-                                Image(systemName: "rectangle.portrait.and.arrow.right")
-                                    .font(.title2)
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 8)
-                            .help("Смотреть в отдельном окне")
-                            .accessibilityLabel("Смотреть в отдельном окне")
-                        }
-                        
-                        // Кнопка переключения полноэкранного режима
-                        Button(action: {
+                } else {
+                    QuickTimeVideoContainer(
+                        player: viewModel.playerManager.avPlayer,
+                        playerState: viewModel.playerManager.state,
+                        channelName: viewModel.playerManager.currentChannel?.name,
+                        isFavorite: viewModel.favoriteIds.contains(channel.id),
+                        onToggleFullscreen: {
                             if let window = NSApp.keyWindow {
                                 window.toggleFullScreen(nil)
                             }
-                        }) {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.title2)
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 8)
-                        .help("Во весь экран")
-                        .accessibilityLabel("Во весь экран")
-                        
-                        Button(action: {
+                        },
+                        onDetachPlayer: {
+                            viewModel.isPlayerDetached = true
+                            openWindow(id: "detached-player")
+                        },
+                        onToggleFavorite: {
                             viewModel.toggleFavorite(channelId: channel.id)
-                        }) {
-                            Image(systemName: viewModel.favoriteIds.contains(channel.id) ? "heart.fill" : "heart")
-                                .font(.title2)
-                                .foregroundColor(viewModel.favoriteIds.contains(channel.id) ? .pink : .secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(viewModel.favoriteIds.contains(channel.id) ? "Удалить из избранного" : "Добавить в избранное")
-                        .accessibilityLabel(viewModel.favoriteIds.contains(channel.id) ? "Удалить из избранного" : "Добавить в избранное")
-                        .padding()
-                    }
-                    .padding()
-                    .background(VisualEffectView(material: .headerView, blendingMode: .withinWindow))
+                        },
+                        preferredBitrate: Binding(
+                            get: { viewModel.playerManager.preferredBitrate },
+                            set: { viewModel.playerManager.preferredBitrate = $0 }
+                        )
+                    )
                 }
             } else {
                 VStack(spacing: 16) {

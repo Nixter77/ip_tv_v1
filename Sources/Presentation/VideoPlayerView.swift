@@ -3,33 +3,30 @@
 import SwiftUI
 import AVKit
 
-/// Кастомный плеер, который не перехватывает фокус клавиатуры у SwiftUI элементов
-private class NonFocusableAVPlayerView: AVPlayerView {
-    override var acceptsFirstResponder: Bool {
-        return false
-    }
+/// Кастомный плеер без перехвата фокуса клавиатуры и без системных контролов
+private class CleanAVPlayerView: AVPlayerView {
+    override var acceptsFirstResponder: Bool { false }
 }
 
-/// Обертка над нативным системным AVPlayerView для macOS Sonoma
+/// Чистый холст видео — без floating controls, без кнопок.
+/// Все управление вынесено в кастомный QuickTime-стиль HUD.
 public struct VideoPlayerView: NSViewRepresentable {
     private let player: AVPlayer
-    
-    /// Инициализатор VideoPlayerView
-    /// - Parameter player: Экземпляр AVPlayer для воспроизведения
+
     public init(player: AVPlayer) {
         self.player = player
     }
-    
+
     public func makeNSView(context: Context) -> AVPlayerView {
-        let playerView = NonFocusableAVPlayerView()
+        let playerView = CleanAVPlayerView()
         playerView.player = player
-        playerView.controlsStyle = .floating // Стильные парящие элементы управления macOS
+        playerView.controlsStyle = .none          // Никаких системных контролов
         playerView.showsFrameSteppingButtons = false
         playerView.showsSharingServiceButton = false
-        playerView.showsFullScreenToggleButton = true // Поддержка нативного полноэкранного режима
+        playerView.showsFullScreenToggleButton = false
         return playerView
     }
-    
+
     public func updateNSView(_ nsView: AVPlayerView, context: Context) {
         nsView.player = player
     }

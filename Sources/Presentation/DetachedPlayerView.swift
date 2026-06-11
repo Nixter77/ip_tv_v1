@@ -3,77 +3,40 @@
 import SwiftUI
 import AVFoundation
 
-/// Окно видеоплеера, предназначенное для отдельного (отсоединенного) просмотра
+/// Окно видеоплеера в QuickTime-стиле для отдельного просмотра.
 public struct DetachedPlayerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Environment(\.dismiss) private var dismiss
-    
-    // Монитор клавиатурных событий для отслеживания клавиши Esc
+
     @State private var escapeMonitor: Any? = nil
-    
+
     public init(viewModel: AppViewModel) {
         self.viewModel = viewModel
     }
-    
+
     public var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            
-            if viewModel.playerManager.currentChannel != nil {
-                ZStack {
-                    // Видео-плеер
-                    VideoPlayerView(player: viewModel.playerManager.avPlayer)
-                        .ignoresSafeArea()
-                    
-                    // HUD Оверлей загрузки или ошибок
-                    PlayerHUDOverlay(state: viewModel.playerManager.state, onRetry: {
-                        if let channel = viewModel.playerManager.currentChannel {
-                            Task {
-                                await viewModel.play(channel: channel)
-                            }
+
+            if let channel = viewModel.playerManager.currentChannel {
+                QuickTimeVideoContainer(
+                    player: viewModel.playerManager.avPlayer,
+                    playerState: viewModel.playerManager.state,
+                    channelName: channel.name,
+                    isFavorite: viewModel.favoriteIds.contains(channel.id),
+                    onToggleFullscreen: {
+                        if let window = NSApp.keyWindow {
+                            window.toggleFullScreen(nil)
                         }
-                    })
-                    
-                    // Кнопки управления в левом верхнем углу
-                    VStack {
-                        HStack(spacing: 12) {
-                            Button(action: {
-                                dismiss()
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                                    Text("Вернуть в главное окно")
-                                }
-                                .padding(8)
-                                .background(Color.black.opacity(0.6))
-                                .cornerRadius(6)
-                                .foregroundColor(.white)
-                            }
-                            .buttonStyle(.plain)
-                            
-                            // Кнопка полноэкранного режима
-                            Button(action: {
-                                if let window = NSApp.keyWindow {
-                                    window.toggleFullScreen(nil)
-                                }
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                    Text("Во весь экран")
-                                }
-                                .padding(8)
-                                .background(Color.black.opacity(0.6))
-                                .cornerRadius(6)
-                                .foregroundColor(.white)
-                            }
-                            .buttonStyle(.plain)
-                            
-                            Spacer()
-                        }
-                        .padding()
-                        Spacer()
-                    }
-                }
+                    },
+                    onToggleFavorite: {
+                        viewModel.toggleFavorite(channelId: channel.id)
+                    },
+                    preferredBitrate: Binding(
+                        get: { viewModel.playerManager.preferredBitrate },
+                        set: { viewModel.playerManager.preferredBitrate = $0 }
+                    )
+                )
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "tv.music.note")
@@ -88,10 +51,10 @@ public struct DetachedPlayerView: View {
         .navigationTitle(viewModel.playerManager.currentChannel?.name ?? "Проигрыватель")
         .onAppear {
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                if event.keyCode == 53 { // Клавиша Esc
+                if event.keyCode == 53 {
                     if let window = NSApp.keyWindow, window.styleMask.contains(.fullScreen) {
                         window.toggleFullScreen(nil)
-                        return nil // Событие обработано
+                        return nil
                     }
                 }
                 return event
@@ -102,11 +65,9 @@ public struct DetachedPlayerView: View {
                 NSEvent.removeMonitor(monitor)
                 escapeMonitor = nil
             }
-            // Мгновенный возврат плеера в главное окно при закрытии
             viewModel.isPlayerDetached = false
         }
     }
-    
 }
 
 #endif
