@@ -341,7 +341,6 @@ public struct QuickTimeVideoContainer: View {
     public var body: some View {
         ZStack {
             VideoPlayerView(player: player)
-                .ignoresSafeArea()
 
             // Буферизация / ошибки
             PlayerHUDOverlay(state: playerState, onRetry: nil)

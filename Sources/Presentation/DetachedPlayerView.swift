@@ -49,6 +49,9 @@ public struct DetachedPlayerView: View {
         }
         .frame(minWidth: 640, minHeight: 360)
         .navigationTitle(viewModel.playerManager.currentChannel?.name ?? "Проигрыватель")
+        .background(WindowAccessor { window in
+            window.isMovableByWindowBackground = true
+        })
         .onAppear {
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 if event.keyCode == 53 {

@@ -144,6 +144,7 @@ public struct MainSplitView: View {
             }
         }
         .listStyle(SidebarListStyle())
+        .padding(.top, 40) // Отступ сверху для компенсации скрытого TitleBar macOS drag-зоны!
         .safeAreaInset(edge: .bottom) {
             // Кнопка перезагрузки внизу сайдбара
             HStack {
@@ -330,6 +331,7 @@ public struct MainSplitView: View {
                             set: { viewModel.playerManager.preferredBitrate = $0 }
                         )
                     )
+                    .ignoresSafeArea()
                 }
             } else {
                 VStack(spacing: 16) {
