@@ -15,3 +15,7 @@
 ## 2024-05-31 - [Optimization] Debounced Search and Granular Persistence
 **Learning:** In SwiftUI ViewModels using Combine, chaining multiple state properties into a single pipeline can cause explosive redundant work. Debouncing and duplicate removal are essential for search inputs. Furthermore, coupling simple state persistence (strings) with complex state persistence (JSON) in a single method creates unnecessary encoding overhead.
 **Action:** Always debounce search inputs and use granular persistence methods to avoid expensive encoding for simple property changes.
+
+## 2024-06-03 - [Optimization] Subset Pruning and Adaptive Tail-Scan
+**Learning:** When implementing 'Subset Pruning' in a multi-criteria filter engine, every subsequent filter MUST use set intersection (`formIntersection`) with the initial subset to prevent accidental global scope overwrites. Additionally, a static tail-scan strategy (filtering a pre-sorted list) is a bottleneck for small result sets.
+**Action:** Always use `formIntersection` for all filter criteria when a subset is provided. Implement adaptive tail-scan logic that chooses between direct sorting ($O(M \log M)$) for small results and master-list filtering ($O(N)$) for large ones.
