@@ -140,6 +140,8 @@ public struct QuickTimeHUDPanel: View {
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
+                .help(isPlaying ? "Пауза" : "Воспроизвести")
+                .accessibilityLabel(isPlaying ? "Пауза" : "Воспроизвести")
 
                 HStack(spacing: 4) {
                     Image(systemName: volumeIcon)
@@ -150,6 +152,8 @@ public struct QuickTimeHUDPanel: View {
                     }
                     .frame(width: 80)
                     .controlSize(.mini)
+                    .help("Громкость: \(Int(volume * 100))%")
+                    .accessibilityLabel("Громкость")
                 }
 
                 Spacer()
@@ -173,6 +177,8 @@ public struct QuickTimeHUDPanel: View {
                     .pickerStyle(.menu)
                     .frame(width: 64)
                     .scaleEffect(0.85)
+                    .help("Выбор качества (битрейт)")
+                    .accessibilityLabel("Выбор качества")
                 }
 
                 if let detach = onDetachPlayer {
@@ -314,6 +320,7 @@ public struct QuickTimeVideoContainer: View {
     var onToggleFullscreen: (() -> Void)?
     var onDetachPlayer: (() -> Void)?
     var onToggleFavorite: (() -> Void)?
+    var onRetry: (() -> Void)?
     var preferredBitrate: Binding<Double>?
 
     @State private var hudVisible: Bool = true
@@ -326,6 +333,7 @@ public struct QuickTimeVideoContainer: View {
         onToggleFullscreen: (() -> Void)? = nil,
         onDetachPlayer: (() -> Void)? = nil,
         onToggleFavorite: (() -> Void)? = nil,
+        onRetry: (() -> Void)? = nil,
         preferredBitrate: Binding<Double>? = nil
     ) {
         self.player = player
@@ -335,6 +343,7 @@ public struct QuickTimeVideoContainer: View {
         self.onToggleFullscreen = onToggleFullscreen
         self.onDetachPlayer = onDetachPlayer
         self.onToggleFavorite = onToggleFavorite
+        self.onRetry = onRetry
         self.preferredBitrate = preferredBitrate
     }
 
@@ -343,7 +352,7 @@ public struct QuickTimeVideoContainer: View {
             VideoPlayerView(player: player)
 
             // Буферизация / ошибки
-            PlayerHUDOverlay(state: playerState, onRetry: nil)
+            PlayerHUDOverlay(state: playerState, onRetry: onRetry)
 
             // QuickTime HUD при воспроизведении
             if case .playing = playerState {
