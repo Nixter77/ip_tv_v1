@@ -51,10 +51,11 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
     public let timeshift: Int?
     public let httpReferrer: String?
 
-    /// Allowed characters for IPTV URL robust parsing (including # fragment which is NOT in urlQueryAllowed)
+    /// Allowed characters for IPTV URL robust parsing (including # and ? which are NOT always in urlQueryAllowed)
     private static let iptvUrlAllowed: CharacterSet = {
         var allowed = CharacterSet.urlQueryAllowed
         allowed.insert("#")
+        allowed.insert("?")
         return allowed
     }()
 
@@ -93,8 +94,9 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
         guard var components = components, components.scheme != nil else {
             // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
-            // for common credential patterns to avoid returning a raw URL that might contain tokens.
+            // for common credential patterns and sensitive parameters to avoid returning a raw URL.
             return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+                .replacingOccurrences(of: "(?<=[?&/])(token|key|auth|sid|uid|session)=[^&\\s#]+", with: "$1=****", options: .regularExpression)
         }
 
         // Mask user credentials
@@ -110,8 +112,8 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
         }
 
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        // Some providers put token-like key=value data in path segments instead of or in addition to a query string.
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in

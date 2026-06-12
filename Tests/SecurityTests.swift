@@ -100,4 +100,39 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_searchQuery_enforcesLengthLimit() async {
+        // AppViewModel requires a repository to initialize
+        let repo = IPTVRepository()
+        let filter = ChannelFilterEngine()
+        let player = PlayerStateManager()
+        let viewModel = await AppViewModel(repository: repo, filterEngine: filter, playerManager: player)
+
+        let longQuery = String(repeating: "a", count: 1000)
+        await MainActor.run {
+            viewModel.searchQuery = longQuery
+            XCTAssertEqual(viewModel.searchQuery.count, 512)
+        }
+    }
+
+    func test_mask_masksPathEvenWithQuery() {
+        let url = "https://host.com/key=secret/play?token=abc"
+        let masked = Stream.mask(url)
+
+        XCTAssertTrue(masked.contains("/key=****"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
+
+    func test_mask_failSecure_masksSensitiveParams() {
+        // An invalid URL that still contains sensitive info (e.g. malformed scheme)
+        let malformed = "http://host.com:invalid_port/play?token=secret&sid=123"
+        let masked = Stream.mask(malformed)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("sid=****"))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("123"))
+    }
 }
