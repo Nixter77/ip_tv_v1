@@ -100,4 +100,42 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_handlesHybridPathAndQueryTokens() {
+        let hybridUrl = "https://example.com/api/key=path_secret/play?token=query_secret"
+        let masked = Stream.mask(hybridUrl)
+
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("path_secret"))
+        XCTAssertFalse(masked.contains("query_secret"))
+    }
+
+    func test_mask_fallbackRegex_masksMalformedUrls() {
+        // A malformed URL that might fail standard parsing even after encoding attempts
+        let malformedUrl = "https://example.com/path?token=secret123|other=val;sid=789"
+        let masked = Stream.mask(malformedUrl)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("other=****"))
+        XCTAssertTrue(masked.contains("sid=****"))
+        XCTAssertFalse(masked.contains("secret123"))
+        XCTAssertFalse(masked.contains("val"))
+        XCTAssertFalse(masked.contains("789"))
+    }
+
+    @MainActor
+    func test_appViewModel_searchQuery_lengthLimit() {
+        // Verify that AppViewModel actually truncates the search query to 512 characters
+        let mockRepo = IPTVRepository()
+        let mockFilter = ChannelFilterEngine()
+        let mockPlayer = PlayerStateManager()
+        let viewModel = AppViewModel(repository: mockRepo, filterEngine: mockFilter, playerManager: mockPlayer)
+
+        let longQuery = String(repeating: "a", count: 1000)
+        viewModel.searchQuery = longQuery
+
+        XCTAssertEqual(viewModel.searchQuery.count, 512)
+        XCTAssertEqual(viewModel.searchQuery, String(longQuery.prefix(512)))
+    }
 }
