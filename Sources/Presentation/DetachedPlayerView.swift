@@ -30,7 +30,7 @@ public struct DetachedPlayerView: View {
                         }
                     },
                     onToggleFavorite: {
-                        viewModel.toggleFavorite(channelId: channel.id)
+                        viewModel.toggleFavorite(channel: channel)
                     },
                     preferredBitrate: Binding(
                         get: { viewModel.playerManager.preferredBitrate },

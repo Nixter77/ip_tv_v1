@@ -158,15 +158,28 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
+            // Optimization: Use Subset Pruning to restrict search space to only favorite IDs (usually < 1000)
+            self.filteredChannels = await filterEngine.filter(
+                query: searchQuery,
+                matchingIds: favoriteIds
+            )
             return
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+            if searchQuery.isEmpty {
+                // Optimization: Directly fetch history channels to preserve chronological order (O(M))
+                self.filteredChannels = await filterEngine.getChannels(ids: historyIds)
+            } else {
+                // Optimization: Use Subset Pruning for history search
+                let historySet = Set(historyIds)
+                let results = await filterEngine.filter(
+                    query: searchQuery,
+                    matchingIds: historySet
+                )
+
+                // Map results back to original history order to keep chronological sequence
+                let channelMap = results.reduce(into: [String: Channel](minimumCapacity: results.count)) { $0[$1.id] = $1 }
+                self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             return
         }
         
@@ -187,14 +200,14 @@ public final class AppViewModel: ObservableObject {
     }
     
     /// Переключение флага избранного канала с персистентным сохранением
-    public func toggleFavorite(channelId: String) {
+    public func toggleFavorite(channel: Channel) {
+        let channelId = channel.id
         if favoriteIds.contains(channelId) {
             favoriteIds.remove(channelId)
             updatePersistedFavorite(channelId: channelId, name: "", isFavorite: false)
         } else {
             favoriteIds.insert(channelId)
-            let channelName = filteredChannels.first(where: { $0.id == channelId })?.name ?? "Канал"
-            updatePersistedFavorite(channelId: channelId, name: channelName, isFavorite: true)
+            updatePersistedFavorite(channelId: channelId, name: channel.name, isFavorite: true)
         }
     }
     

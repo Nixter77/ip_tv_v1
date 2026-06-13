@@ -18,11 +18,28 @@ public protocol ChannelFilterEngineProtocol: Sendable {
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>?
     ) async -> [Channel]
     
     /// Получить все доступные потоки для конкретного канала
     func streams(for channelId: String) async -> [Stream]
+
+    /// Получить список каналов по их ID (сохраняя порядок)
+    func getChannels(ids: [String]) async -> [Channel]
+}
+
+/// Расширение для обеспечения значений по умолчанию в протоколе
+public extension ChannelFilterEngineProtocol {
+    func filter(
+        query: String? = nil,
+        category: String? = nil,
+        country: String? = nil,
+        language: String? = nil,
+        matchingIds: Set<String>? = nil
+    ) async -> [Channel] {
+        await filter(query: query, category: category, country: country, language: language, matchingIds: matchingIds)
+    }
 }
 
 /// Высокопроизводительная реализация ChannelFilterEngine в виде Swift Actor.
@@ -156,12 +173,14 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     ///   - category: Выбранная категория
     ///   - country: Выбранная страна
     ///   - language: Выбранный язык
+    ///   - matchingIds: Ограничение поиска подмножеством ID (Subset Pruning)
     /// - Returns: Список отфильтрованных и отсортированных каналов
     public func filter(
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>? = nil
     ) async -> [Channel] {
         // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
         let hasFilters = (query != nil && !query!.isEmpty) ||
@@ -169,11 +188,12 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                          (country != nil && !country!.isEmpty) ||
                          (language != nil && !language!.isEmpty)
 
-        if !hasFilters {
+        if !hasFilters && matchingIds == nil {
             return allChannelsSorted
         }
 
-        var resultSet: Set<String>? = nil
+        // Subset Pruning: инициализируем resultSet входным множеством, если оно задано
+        var resultSet: Set<String>? = matchingIds
         
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
@@ -256,9 +276,21 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             return allChannelsSorted
         }
         
-        // Оптимизация: вместо compactMap + sorted (O(M log M)),
-        // фильтруем уже отсортированный массив всех каналов за O(N).
-        return allChannelsSorted.filter { finalIds.contains($0.id) }
+        // Tail-Scan Optimization:
+        // Для маленьких выборок (M < 1000, например, История или Избранное)
+        // O(M log M) через прямую сортировку быстрее, чем O(N) скан 50к элементов.
+        if finalIds.count < 1000 {
+            return finalIds.compactMap { self.channels[$0] }
+                .sorted { $0.name < $1.name }
+        } else {
+            // Для больших наборов (M >= 1000) эффективнее O(N) проход по отсортированному мастер-списку.
+            return allChannelsSorted.filter { finalIds.contains($0.id) }
+        }
+    }
+
+    /// Получить список каналов по их ID (сохраняя порядок)
+    public func getChannels(ids: [String]) async -> [Channel] {
+        return ids.compactMap { channels[$0] }
     }
 
     /// Получить все доступные потоки для конкретного канала

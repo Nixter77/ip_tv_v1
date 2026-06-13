@@ -271,7 +271,7 @@ public struct MainSplitView: View {
                         channel: channel,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
                         onFavoriteToggle: {
-                            viewModel.toggleFavorite(channelId: channel.id)
+                            viewModel.toggleFavorite(channel: channel)
                         }
                     )
                     .tag(channel)
@@ -324,7 +324,7 @@ public struct MainSplitView: View {
                             openWindow(id: "detached-player")
                         },
                         onToggleFavorite: {
-                            viewModel.toggleFavorite(channelId: channel.id)
+                            viewModel.toggleFavorite(channel: channel)
                         },
                         preferredBitrate: Binding(
                             get: { viewModel.playerManager.preferredBitrate },
