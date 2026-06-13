@@ -140,6 +140,8 @@ public struct QuickTimeHUDPanel: View {
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
+                .help(isPlaying ? "Пауза" : "Воспроизведение")
+                .accessibilityLabel(isPlaying ? "Пауза" : "Воспроизведение")
 
                 HStack(spacing: 4) {
                     Image(systemName: volumeIcon)
@@ -150,6 +152,8 @@ public struct QuickTimeHUDPanel: View {
                     }
                     .frame(width: 80)
                     .controlSize(.mini)
+                    .help("Громкость")
+                    .accessibilityLabel("Громкость")
                 }
 
                 Spacer()
@@ -173,6 +177,8 @@ public struct QuickTimeHUDPanel: View {
                     .pickerStyle(.menu)
                     .frame(width: 64)
                     .scaleEffect(0.85)
+                    .help("Выбор качества")
+                    .accessibilityLabel("Выбор качества")
                 }
 
                 if let detach = onDetachPlayer {
@@ -182,6 +188,7 @@ public struct QuickTimeHUDPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help("Смотреть в отдельном окне")
+                    .accessibilityLabel("Смотреть в отдельном окне")
                 }
 
                 if let fullscreen = onToggleFullscreen {
@@ -191,6 +198,7 @@ public struct QuickTimeHUDPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help("Во весь экран")
+                    .accessibilityLabel("Во весь экран")
                 }
 
                 if let fav = onToggleFavorite {
