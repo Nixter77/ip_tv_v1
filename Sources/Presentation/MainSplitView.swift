@@ -270,6 +270,8 @@ public struct MainSplitView: View {
                     ChannelRowView(
                         channel: channel,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
+                        isCurrent: viewModel.playerManager.currentChannel?.id == channel.id,
+                        isPlaying: viewModel.playerManager.state.isPlayingOrLoading,
                         onFavoriteToggle: {
                             viewModel.toggleFavorite(channelId: channel.id)
                         }
@@ -360,6 +362,8 @@ public struct MainSplitView: View {
 struct ChannelRowView: View {
     let channel: Channel
     let isFavorite: Bool
+    let isCurrent: Bool
+    let isPlaying: Bool
     let onFavoriteToggle: () -> Void
     
     @State private var isHovered = false
@@ -396,9 +400,20 @@ struct ChannelRowView: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(channel.name)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(channel.name)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+
+                    if isCurrent {
+                        Image(systemName: "waveform")
+                            .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isPlaying)
+                            .foregroundColor(.blue)
+                            .font(.caption)
+                            .help("Сейчас воспроизводится")
+                            .accessibilityLabel("Сейчас воспроизводится")
+                    }
+                }
                 
                 HStack(spacing: 8) {
                     if let country = channel.country {

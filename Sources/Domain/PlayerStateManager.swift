@@ -10,6 +10,20 @@ public enum PlayerState: Equatable, Sendable {
     case loading(stream: Stream)
     case playing(stream: Stream)
     case failed(stream: Stream, error: String)
+
+    /// Returns true if the player is currently playing a stream.
+    public var isPlaying: Bool {
+        if case .playing = self { return true }
+        return false
+    }
+
+    /// Returns true if the player is either playing or currently loading a stream.
+    public var isPlayingOrLoading: Bool {
+        switch self {
+        case .playing, .loading: return true
+        default: return false
+        }
+    }
 }
 
 /// Управление воспроизведением и авто-фолбэками
