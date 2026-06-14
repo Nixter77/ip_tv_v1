@@ -26,9 +26,7 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 @MainActor
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
-    @Published public var searchQuery: String = "" {
-        didSet { saveSearchQuery() }
-    }
+    @Published public var searchQuery: String = ""
     @Published public var selectedTab: SidebarTab = .all {
         didSet { saveSelectedTab() }
     }
@@ -90,6 +88,8 @@ public final class AppViewModel: ObservableObject {
         )
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _, _, _ in
+                // Сохраняем поисковый запрос (дебаунсится вместе с пайплайном)
+                self?.saveSearchQuery()
                 Task {
                     await self?.updateFilteredChannels()
                 }
@@ -158,15 +158,34 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
+            // Оптимизация: используем Subset Pruning для фильтрации только внутри избранного (O(M))
+            self.filteredChannels = await filterEngine.filter(
+                query: searchQuery,
+                category: nil,
+                country: nil,
+                language: nil,
+                matchingIds: favoriteIds
+            )
             return
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+            // Оптимизация: используем Subset Pruning (O(M)) и восстанавливаем хронологический порядок
+            let matchingHistoryIds = Set(historyIds)
+            let filteredResults = await filterEngine.filter(
+                query: searchQuery,
+                category: nil,
+                country: nil,
+                language: nil,
+                matchingIds: matchingHistoryIds
+            )
+
+            // Если поиска нет, возвращаем историю как есть (уже эффективно)
+            if searchQuery.isEmpty {
+                self.filteredChannels = await filterEngine.getChannels(ids: historyIds)
+            } else {
+                // Если есть поиск, фильтруем оригинальный список historyIds для сохранения порядка
+                let sortedChannelsMap = filteredResults.reduce(into: [String: Channel]()) { $0[$1.id] = $1 }
+                self.filteredChannels = historyIds.compactMap { sortedChannelsMap[$0] }
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             return
         }
         

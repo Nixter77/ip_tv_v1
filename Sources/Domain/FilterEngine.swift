@@ -18,9 +18,13 @@ public protocol ChannelFilterEngineProtocol: Sendable {
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>?
     ) async -> [Channel]
     
+    /// Получить список каналов по их ID в произвольном порядке
+    func getChannels(ids: [String]) async -> [Channel]
+
     /// Получить все доступные потоки для конкретного канала
     func streams(for channelId: String) async -> [Stream]
 }
@@ -116,6 +120,11 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         self.allChannelsSorted = self.channels.values.sorted { $0.name < $1.name }
     }
 
+    /// Получить список каналов по их ID в произвольном порядке (O(M))
+    public func getChannels(ids: [String]) async -> [Channel] {
+        return ids.compactMap { channels[$0] }
+    }
+
     /// Вспомогательный метод для двоичного поиска токенов с заданным префиксом.
     /// Работает за O(log K) вместо O(K) линейного поиска.
     private func findTokenRange(startingWith prefix: String) -> Range<Int>? {
@@ -161,7 +170,8 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>? = nil
     ) async -> [Channel] {
         // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
         let hasFilters = (query != nil && !query!.isEmpty) ||
@@ -170,14 +180,26 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                          (language != nil && !language!.isEmpty)
 
         if !hasFilters {
+            if let matchingIds = matchingIds {
+                // Если заданы matchingIds, возвращаем только их в алфавитном порядке
+                // Используем Tail-Scan оптимизацию для выбора стратегии сортировки
+                return sortMatches(matchingIds)
+            }
             return allChannelsSorted
         }
 
-        var resultSet: Set<String>? = nil
+        // Инициализируем resultSet из matchingIds (Subset Pruning), если они предоставлены
+        var resultSet: Set<String>? = matchingIds
         
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
-            resultSet = channelsByCategory[category.lowercased()] ?? []
+            let categorySet = channelsByCategory[category.lowercased()] ?? []
+            if var current = resultSet {
+                current.formIntersection(categorySet)
+                resultSet = current
+            } else {
+                resultSet = categorySet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
@@ -256,9 +278,22 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             return allChannelsSorted
         }
         
-        // Оптимизация: вместо compactMap + sorted (O(M log M)),
-        // фильтруем уже отсортированный массив всех каналов за O(N).
-        return allChannelsSorted.filter { finalIds.contains($0.id) }
+        // Tail-Scan оптимизация: выбор между O(N) сканированием и O(M log M) сортировкой
+        return sortMatches(finalIds)
+    }
+
+    /// Вспомогательный метод для оптимальной сортировки результатов (Tail-Scan).
+    /// Для небольших выборок (M < 1000) быстрее сделать выборку по словарю и отсортировать.
+    /// Для больших выборок быстрее отфильтровать заранее отсортированный мастер-список.
+    private func sortMatches(_ ids: Set<String>) -> [Channel] {
+        if ids.count < 1000 {
+            // O(M log M) - быстрее для маленьких M
+            return ids.compactMap { channels[$0] }
+                      .sorted { $0.name < $1.name }
+        } else {
+            // O(N) - быстрее для больших M, так как избегаем дорогой сортировки
+            return allChannelsSorted.filter { ids.contains($0.id) }
+        }
     }
 
     /// Получить все доступные потоки для конкретного канала
