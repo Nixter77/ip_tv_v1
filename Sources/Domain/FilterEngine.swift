@@ -18,11 +18,28 @@ public protocol ChannelFilterEngineProtocol: Sendable {
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>?
     ) async -> [Channel]
     
+    /// Получить каналы по списку ID с сохранением порядка
+    func getChannels(ids: [String]) async -> [Channel]
+
     /// Получить все доступные потоки для конкретного канала
     func streams(for channelId: String) async -> [Stream]
+}
+
+/// Дефолтные значения для сохранения совместимости
+public extension ChannelFilterEngineProtocol {
+    func filter(
+        query: String? = nil,
+        category: String? = nil,
+        country: String? = nil,
+        language: String? = nil,
+        matchingIds: Set<String>? = nil
+    ) async -> [Channel] {
+        await filter(query: query, category: category, country: country, language: language, matchingIds: matchingIds)
+    }
 }
 
 /// Высокопроизводительная реализация ChannelFilterEngine в виде Swift Actor.
@@ -157,11 +174,25 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     ///   - country: Выбранная страна
     ///   - language: Выбранный язык
     /// - Returns: Список отфильтрованных и отсортированных каналов
+    /// Получить каналы по списку ID с сохранением порядка (O(M) сложность)
+    public func getChannels(ids: [String]) async -> [Channel] {
+        return ids.compactMap { channels[$0] }
+    }
+
+    /// Фильтрация с использованием предвычисленных индексов (< 50мс)
+    /// - Parameters:
+    ///   - query: Текстовый поисковый запрос
+    ///   - category: Выбранная категория
+    ///   - country: Выбранная страна
+    ///   - language: Выбранный язык
+    ///   - matchingIds: Ограничение поиска подмножеством ID (Subset Pruning)
+    /// - Returns: Список отфильтрованных и отсортированных каналов
     public func filter(
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>? = nil
     ) async -> [Channel] {
         // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
         let hasFilters = (query != nil && !query!.isEmpty) ||
@@ -169,15 +200,21 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                          (country != nil && !country!.isEmpty) ||
                          (language != nil && !language!.isEmpty)
 
-        if !hasFilters {
+        if !hasFilters && matchingIds == nil {
             return allChannelsSorted
         }
 
-        var resultSet: Set<String>? = nil
+        var resultSet: Set<String>? = matchingIds
         
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
-            resultSet = channelsByCategory[category.lowercased()] ?? []
+            let categorySet = channelsByCategory[category.lowercased()] ?? []
+            if var current = resultSet {
+                current.formIntersection(categorySet)
+                resultSet = current
+            } else {
+                resultSet = categorySet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
@@ -256,9 +293,14 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             return allChannelsSorted
         }
         
-        // Оптимизация: вместо compactMap + sorted (O(M log M)),
-        // фильтруем уже отсортированный массив всех каналов за O(N).
-        return allChannelsSorted.filter { finalIds.contains($0.id) }
+        // Гибридная стратегия tail-scan (выбор оптимального алгоритма сборки результата)
+        if finalIds.count < 1000 {
+            // Для маленьких наборов O(M log M) быстрее, чем полный скан O(N) по 50k элементам
+            return finalIds.compactMap { channels[$0] }.sorted { $0.name < $1.name }
+        } else {
+            // Для больших наборов O(N) фильтрация предсортированного списка эффективнее
+            return allChannelsSorted.filter { finalIds.contains($0.id) }
+        }
     }
 
     /// Получить все доступные потоки для конкретного канала

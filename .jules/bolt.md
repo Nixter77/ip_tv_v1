@@ -15,3 +15,7 @@
 ## 2024-05-31 - [Optimization] Debounced Search and Granular Persistence
 **Learning:** In SwiftUI ViewModels using Combine, chaining multiple state properties into a single pipeline can cause explosive redundant work. Debouncing and duplicate removal are essential for search inputs. Furthermore, coupling simple state persistence (strings) with complex state persistence (JSON) in a single method creates unnecessary encoding overhead.
 **Action:** Always debounce search inputs and use granular persistence methods to avoid expensive encoding for simple property changes.
+
+## 2025-05-31 - [Optimization] Hybrid Tail-Scan Sorting
+**Learning:** For final result assembly in a filtered list of 50k items, the optimal strategy depends on the result set size ($M$). For small results ($M < 1000$), direct sorting of collected items ($O(M \log M)$) is faster than scanning the entire pre-sorted master list ($O(N)$). Conversely, for large results, the $O(N)$ filter on the pre-sorted list is more efficient as it avoids expensive sorting.
+**Action:** Implement hybrid logic that switches between direct sorting and master-list filtering based on a threshold (e.g., 1000 items) to maximize performance across all search scenarios.

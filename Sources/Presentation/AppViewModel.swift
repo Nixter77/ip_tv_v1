@@ -26,9 +26,7 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 @MainActor
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
-    @Published public var searchQuery: String = "" {
-        didSet { saveSearchQuery() }
-    }
+    @Published public var searchQuery: String = ""
     @Published public var selectedTab: SidebarTab = .all {
         didSet { saveSelectedTab() }
     }
@@ -89,8 +87,11 @@ public final class AppViewModel: ObservableObject {
                 .removeDuplicates()
         )
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
+            .sink { [weak self] query, _, _ in
                 Task {
+                    // Оптимизация: сохраняем поиск только при фактическом изменении (debounced)
+                    // Это снижает нагрузку на диск по сравнению с didSet
+                    self?.saveSearchQuery(query)
                     await self?.updateFilteredChannels()
                 }
             }
@@ -158,15 +159,29 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
+            // Оптимизация: передаем favoriteIds в движок для Subset Pruning.
+            // Это исключает сканирование всех 50k каналов.
+            self.filteredChannels = await filterEngine.filter(
+                query: searchQuery,
+                category: nil,
+                country: nil,
+                language: nil,
+                matchingIds: favoriteIds
+            )
             return
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
-            }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
+            // Оптимизация: фильтруем только те ID, что есть в истории, и возвращаем их в порядке просмотра (O(M)).
+            // Исключает тяжелый reduce (O(N)) и создание временного словаря.
+            let matchingHistoryIds = await filterEngine.filter(
+                query: searchQuery,
+                category: nil,
+                country: nil,
+                language: nil,
+                matchingIds: Set(historyIds)
+            ).map { $0.id }
+
+            let resultSet = Set(matchingHistoryIds)
+            self.filteredChannels = await filterEngine.getChannels(ids: historyIds.filter { resultSet.contains($0) })
             return
         }
         
@@ -283,8 +298,8 @@ public final class AppViewModel: ObservableObject {
     // MARK: - UserDefaults Логика настроек сессии
 
     /// Сохранение поискового запроса в UserDefaults (быстрая операция со строкой)
-    private func saveSearchQuery() {
-        UserDefaults.standard.set(searchQuery, forKey: "lastSearchQuery")
+    private func saveSearchQuery(_ query: String) {
+        UserDefaults.standard.set(query, forKey: "lastSearchQuery")
     }
 
     /// Сохранение выбранной вкладки в UserDefaults (операция с JSON кодированием)
@@ -296,7 +311,7 @@ public final class AppViewModel: ObservableObject {
 
     /// Сохранение всех настроек (для обратной совместимости или пакетного обновления)
     private func saveSettings() {
-        saveSearchQuery()
+        saveSearchQuery(searchQuery)
         saveSelectedTab()
     }
     
