@@ -93,8 +93,14 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
         guard var components = components, components.scheme != nil else {
             // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
-            // for common credential patterns to avoid returning a raw URL that might contain tokens.
-            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+            // for common credential patterns and parameters to avoid returning a raw URL that might contain tokens.
+            let credentialsMasked = urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+            let sensitivePattern = #"(?<=[?&/|;])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+            guard let sensitiveRegex = try? NSRegularExpression(pattern: sensitivePattern) else {
+                return credentialsMasked
+            }
+            let range = NSRange(credentialsMasked.startIndex..<credentialsMasked.endIndex, in: credentialsMasked)
+            return sensitiveRegex.stringByReplacingMatches(in: credentialsMasked, range: range, withTemplate: "$1=****")
         }
 
         // Mask user credentials
@@ -110,8 +116,9 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
         }
 
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        // Some providers put token-like key=value data in path segments.
+        // We mask them unconditionally to prevent sensitive data leakage even if query parameters exist.
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in
@@ -133,6 +140,7 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
     public static func maskURLs(in text: String) -> String {
+        // Broad pattern to find URLs.
         let pattern = #"https?://[^\s]+"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return text
@@ -147,6 +155,19 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             guard let matchRange = Range(match.range, in: result) else { continue }
             let urlString = String(result[matchRange])
             result.replaceSubrange(matchRange, with: mask(urlString))
+        }
+
+        // Second pass: Use a fail-secure regex to catch any sensitive parameters that might have
+        // survived standard masking (e.g. in malformed URLs or complex IPTV structures).
+        // Delimiters: ?, &, /, |, ;
+        let sensitivePattern = #"(?<=[?&/|;])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+        if let sensitiveRegex = try? NSRegularExpression(pattern: sensitivePattern) {
+            let sensitiveRange = NSRange(result.startIndex..<result.endIndex, in: result)
+            result = sensitiveRegex.stringByReplacingMatches(
+                in: result,
+                range: sensitiveRange,
+                withTemplate: "$1=****"
+            )
         }
 
         return result

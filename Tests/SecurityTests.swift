@@ -100,4 +100,42 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_unconditionallyMasksKeywordsInPath() {
+        // Path contains '=' AND there are query parameters.
+        // Previously it would ONLY mask path if queryItems was nil.
+        let url = "https://provider.com/auth=token123/stream?format=ts"
+        let masked = Stream.mask(url)
+
+        XCTAssertTrue(masked.contains("auth=****"))
+        XCTAssertTrue(masked.contains("format=****"))
+        XCTAssertFalse(masked.contains("token123"))
+        XCTAssertFalse(masked.contains("ts"))
+    }
+
+    func test_maskURLs_usesFailSecureRegexPass() {
+        // Test with non-standard delimiters that IPTV providers sometimes use
+        let malformedError = "Error loading: https://provider.com/play|token=secret123;session=999"
+        let masked = Stream.maskURLs(in: malformedError)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("session=****"))
+        XCTAssertFalse(masked.contains("secret123"))
+        XCTAssertFalse(masked.contains("999"))
+    }
+
+    @MainActor
+    func test_searchQuery_isCappedAt512Characters() async {
+        let viewModel = AppViewModel(
+            repository: IPTVRepository(),
+            filterEngine: ChannelFilterEngine(),
+            playerManager: PlayerStateManager()
+        )
+
+        let longQuery = String(repeating: "a", count: 1000)
+        viewModel.searchQuery = longQuery
+
+        XCTAssertEqual(viewModel.searchQuery.count, 512)
+        XCTAssertEqual(viewModel.searchQuery, String(repeating: "a", count: 512))
+    }
 }
