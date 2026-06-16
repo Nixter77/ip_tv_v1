@@ -13,7 +13,8 @@ final class SecurityTests: XCTestCase {
         )
 
         let masked = stream.maskedUrlString
-        XCTAssertTrue(masked.contains("****:****@example.com"))
+        // Implementation now uses a single **** for the entire credential block
+        XCTAssertTrue(masked.contains("://****@example.com"))
         XCTAssertFalse(masked.contains("user"))
         XCTAssertFalse(masked.contains("password"))
     }
@@ -64,7 +65,7 @@ final class SecurityTests: XCTestCase {
         let rawError = "Failed to load stream at http://user:pass@host.com/play?token=123 and also check https://other.com/key=456 for details"
         let masked = Stream.maskURLs(in: rawError)
 
-        XCTAssertTrue(masked.contains("http://****:****@host.com/play?token=****"))
+        XCTAssertTrue(masked.contains("http://****@host.com/play?token=****"))
         XCTAssertTrue(masked.contains("https://other.com/key=****"))
         XCTAssertFalse(masked.contains("user"))
         XCTAssertFalse(masked.contains("pass"))
@@ -98,6 +99,33 @@ final class SecurityTests: XCTestCase {
         // Ensure the token value is masked even if the URL had a space (which usually breaks URLComponents)
         XCTAssertTrue(masked.contains("token=****"))
         XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("password"))
+    }
+
+    func test_mask_handlesHybridUrl_withPathAndQueryTokens() {
+        let hybridUrl = "https://example.com/auth=token123/stream.m3u8?session=abc"
+        let masked = Stream.mask(hybridUrl)
+
+        // Path token should be masked
+        XCTAssertTrue(masked.contains("auth=****"))
+        XCTAssertFalse(masked.contains("token123"))
+
+        // Query token should also be masked
+        XCTAssertTrue(masked.contains("session=****"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
+
+    func test_mask_failSecure_masksComplexMalformedUrls() {
+        // A malformed URL with pipes and spaces that URLComponents might fail on even after encoding
+        let malformed = "http://user:pass@host.com/play|token=123|key=456 password"
+        let masked = Stream.mask(malformed)
+
+        XCTAssertTrue(masked.contains("http://****@host.com"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertFalse(masked.contains("pass"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("456"))
         XCTAssertFalse(masked.contains("password"))
     }
 }
