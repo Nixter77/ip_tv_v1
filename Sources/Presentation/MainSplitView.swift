@@ -270,6 +270,7 @@ public struct MainSplitView: View {
                     ChannelRowView(
                         channel: channel,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
+                        isPlaying: viewModel.playerManager.currentChannel?.id == channel.id && viewModel.playerManager.state.isPlaying,
                         onFavoriteToggle: {
                             viewModel.toggleFavorite(channelId: channel.id)
                         }
@@ -326,6 +327,11 @@ public struct MainSplitView: View {
                         onToggleFavorite: {
                             viewModel.toggleFavorite(channelId: channel.id)
                         },
+                        onRetry: {
+                            Task {
+                                await viewModel.play(channel: channel)
+                            }
+                        },
                         preferredBitrate: Binding(
                             get: { viewModel.playerManager.preferredBitrate },
                             set: { viewModel.playerManager.preferredBitrate = $0 }
@@ -360,12 +366,26 @@ public struct MainSplitView: View {
 struct ChannelRowView: View {
     let channel: Channel
     let isFavorite: Bool
+    let isPlaying: Bool
     let onFavoriteToggle: () -> Void
     
     @State private var isHovered = false
     
     var body: some View {
         HStack(spacing: 12) {
+            // Индикатор воспроизведения
+            if isPlaying {
+                Image(systemName: "waveform")
+                    .symbolEffect(.variableColor.iterative, options: .repeating)
+                    .foregroundColor(.blue)
+                    .frame(width: 16)
+                    .help("Сейчас воспроизводится")
+                    .accessibilityLabel("Сейчас воспроизводится")
+            } else {
+                Spacer()
+                    .frame(width: 16)
+            }
+
             // Логотип с AsyncImage и кастомным Gradient Placeholder
             AsyncImage(url: channel.logo.flatMap { URL(string: $0) }) { phase in
                 switch phase {
