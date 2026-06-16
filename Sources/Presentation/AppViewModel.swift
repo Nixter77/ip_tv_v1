@@ -158,15 +158,36 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
+            // Оптимизация: передаем favoriteIds в filterEngine для Subset Pruning.
+            // Это значительно быстрее, чем фильтровать полный список на MainActor.
+            self.filteredChannels = await filterEngine.filter(
+                query: searchQuery,
+                category: nil,
+                country: nil,
+                language: nil,
+                matchingIds: favoriteIds
+            )
             return
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+            if searchQuery.isEmpty {
+                // Оптимизация: если поиска нет, получаем объекты напрямую по ID истории.
+                // Это O(M) и сохраняет хронологический порядок без лишних вычислений.
+                self.filteredChannels = await filterEngine.getChannels(ids: historyIds)
+            } else {
+                // Если есть поиск, сначала фильтруем в движке по подмножеству истории.
+                let matchedChannels = await filterEngine.filter(
+                    query: searchQuery,
+                    category: nil,
+                    country: nil,
+                    language: nil,
+                    matchingIds: Set(historyIds)
+                )
+
+                // Чтобы сохранить хронологический порядок (historyIds), а не алфавитный (из filterEngine),
+                // строим карту результатов и сопоставляем ее с оригинальным списком ID.
+                let matchedMap = matchedChannels.reduce(into: [String: Channel]()) { $0[$1.id] = $1 }
+                self.filteredChannels = historyIds.compactMap { matchedMap[$0] }
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             return
         }
         

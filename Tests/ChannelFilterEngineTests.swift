@@ -151,4 +151,47 @@ final class ChannelFilterEngineTests: XCTestCase {
         XCTAssertLessThan(filterDuration, 0.080, "Filter duration must be under 80ms in Debug mode")
         XCTAssertFalse(filtered.isEmpty)
     }
+
+    /// Тест: фильтрация подмножества (matchingIds)
+    func test_filterWithMatchingIds() async {
+        let channels = [
+            makeChannel(id: "1", name: "Apple"),
+            makeChannel(id: "2", name: "Banana"),
+            makeChannel(id: "3", name: "Cherry"),
+            makeChannel(id: "4", name: "Date")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        // Фильтруем только Apple и Cherry
+        let matchingIds: Set<String> = ["1", "3"]
+        let filtered = await engine.filter(query: nil, category: nil, country: nil, language: nil, matchingIds: matchingIds)
+
+        XCTAssertEqual(filtered.count, 2)
+        XCTAssertEqual(filtered[0].id, "1")
+        XCTAssertEqual(filtered[1].id, "3")
+
+        // Поиск внутри подмножества
+        let searched = await engine.filter(query: "a", category: nil, country: nil, language: nil, matchingIds: matchingIds)
+        XCTAssertEqual(searched.count, 1)
+        XCTAssertEqual(searched.first?.id, "1") // Apple matches "a", Cherry does not
+    }
+
+    /// Тест: получение каналов по ID (getChannels)
+    func test_getChannelsPreservesOrder() async {
+        let channels = [
+            makeChannel(id: "1", name: "A"),
+            makeChannel(id: "2", name: "B"),
+            makeChannel(id: "3", name: "C")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        let ids = ["3", "1"]
+        let result = await engine.getChannels(ids: ids)
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].id, "3")
+        XCTAssertEqual(result[1].id, "1")
+    }
 }
