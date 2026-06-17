@@ -269,6 +269,12 @@ public struct MainSplitView: View {
                 List(viewModel.filteredChannels, id: \.id, selection: $selectedChannel) { channel in
                     ChannelRowView(
                         channel: channel,
+                        isActive: viewModel.playerManager.currentChannel?.id == channel.id && {
+                            switch viewModel.playerManager.state {
+                            case .playing, .loading: return true
+                            default: return false
+                            }
+                        }(),
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
                         onFavoriteToggle: {
                             viewModel.toggleFavorite(channelId: channel.id)
@@ -326,6 +332,11 @@ public struct MainSplitView: View {
                         onToggleFavorite: {
                             viewModel.toggleFavorite(channelId: channel.id)
                         },
+                        onRetry: {
+                            Task {
+                                await viewModel.play(channel: channel)
+                            }
+                        },
                         preferredBitrate: Binding(
                             get: { viewModel.playerManager.preferredBitrate },
                             set: { viewModel.playerManager.preferredBitrate = $0 }
@@ -359,6 +370,7 @@ public struct MainSplitView: View {
 // MARK: - Строка Списка Каналов (ChannelRowView)
 struct ChannelRowView: View {
     let channel: Channel
+    let isActive: Bool
     let isFavorite: Bool
     let onFavoriteToggle: () -> Void
     
@@ -396,9 +408,20 @@ struct ChannelRowView: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(channel.name)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(channel.name)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+
+                    if isActive {
+                        Image(systemName: "waveform")
+                            .symbolEffect(.variableColor.iterative, options: .repeating)
+                            .foregroundColor(.blue)
+                            .font(.system(size: 10, weight: .bold))
+                            .help("Сейчас воспроизводится")
+                            .accessibilityLabel("Сейчас воспроизводится")
+                    }
+                }
                 
                 HStack(spacing: 8) {
                     if let country = channel.country {
