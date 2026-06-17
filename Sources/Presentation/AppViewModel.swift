@@ -27,7 +27,12 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
     @Published public var searchQuery: String = "" {
-        didSet { saveSearchQuery() }
+        didSet {
+            // DoS protection: limit query length
+            if searchQuery.count > 512 {
+                searchQuery = String(searchQuery.prefix(512))
+            }
+        }
     }
     @Published public var selectedTab: SidebarTab = .all {
         didSet { saveSelectedTab() }
@@ -79,10 +84,14 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
+        // Debounced search and filtering
+        let debouncedQuery = $searchQuery
+            .removeDuplicates()
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .share()
+
         Publishers.CombineLatest3(
-            $searchQuery
-                .removeDuplicates()
-                .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
+            debouncedQuery,
             $selectedTab
                 .removeDuplicates(),
             $favoriteIds
@@ -96,6 +105,13 @@ public final class AppViewModel: ObservableObject {
             }
             .store(in: &cancellables)
             
+        // Performance: Debounce Disk I/O for search query persistence
+        debouncedQuery
+            .sink { [weak self] query in
+                self?.saveSearchQuery(query)
+            }
+            .store(in: &cancellables)
+
         playerManager.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -283,8 +299,8 @@ public final class AppViewModel: ObservableObject {
     // MARK: - UserDefaults Логика настроек сессии
 
     /// Сохранение поискового запроса в UserDefaults (быстрая операция со строкой)
-    private func saveSearchQuery() {
-        UserDefaults.standard.set(searchQuery, forKey: "lastSearchQuery")
+    private func saveSearchQuery(_ query: String) {
+        UserDefaults.standard.set(query, forKey: "lastSearchQuery")
     }
 
     /// Сохранение выбранной вкладки в UserDefaults (операция с JSON кодированием)
@@ -296,7 +312,7 @@ public final class AppViewModel: ObservableObject {
 
     /// Сохранение всех настроек (для обратной совместимости или пакетного обновления)
     private func saveSettings() {
-        saveSearchQuery()
+        saveSearchQuery(searchQuery)
         saveSelectedTab()
     }
     

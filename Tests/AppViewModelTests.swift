@@ -139,6 +139,16 @@ final class AppViewModelTests: XCTestCase {
         let streams = await engine.streams(for: channel.id)
         XCTAssertEqual(player.state, .loading(stream: streams.first!))
     }
+
+    /// Тест: Ограничение длины поискового запроса (DoS защита)
+    func test_searchQueryLengthLimit() {
+        let vm = try! XCTUnwrap(viewModel)
+        let longQuery = String(repeating: "a", count: 1000)
+        vm.searchQuery = longQuery
+
+        XCTAssertEqual(vm.searchQuery.count, 512)
+        XCTAssertEqual(vm.searchQuery, String(longQuery.prefix(512)))
+    }
 }
 
 #endif

@@ -85,19 +85,35 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
     /// Masks sensitive information in a single URL string
     public static func mask(_ urlString: String) -> String {
-        // Attempt parsing. If it fails (e.g. due to spaces), try encoding it first (preserving #).
-        var components = URLComponents(string: urlString)
-        if components == nil, let encoded = urlString.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed) {
+        // 1. Regex-based masking (Defense in Depth)
+        // Redact credentials
+        var masked = urlString.replacingOccurrences(
+            of: #"://[^@\s]+@"#,
+            with: "://****@",
+            options: .regularExpression
+        )
+
+        // Redact key=value pairs with various delimiters common in IPTV (including |, ;)
+        // Pattern matches: prefix delimiter, then key, then =, then value until next delimiter/space/hash
+        // Using lookbehind to ensure we don't consume the delimiter itself
+        let paramPattern = #"(?<=[?&/|;])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+        masked = masked.replacingOccurrences(
+            of: paramPattern,
+            with: "$1=****",
+            options: .regularExpression
+        )
+
+        // 2. Standard parsing as second layer for fragments and structured components
+        var components = URLComponents(string: masked)
+        if components == nil, let encoded = masked.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed) {
             components = URLComponents(string: encoded)
         }
 
         guard var components = components, components.scheme != nil else {
-            // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
-            // for common credential patterns to avoid returning a raw URL that might contain tokens.
-            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+            return masked
         }
 
-        // Mask user credentials
+        // Mask user credentials (redundant but safe)
         if components.user != nil || components.password != nil {
             components.user = "****"
             if components.password != nil {
@@ -105,13 +121,14 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             }
         }
 
-        // Mask query parameter values to protect session tokens/keys
+        // Mask query parameter values (redundant but safe)
         if let queryItems = components.queryItems {
             components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
         }
 
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        // Ensure path segments with '=' are masked (e.g. /token=123/)
+        // Some providers put tokens in paths; we mask them regardless of query string presence.
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in
@@ -128,7 +145,7 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.fragment = "****"
         }
 
-        return components.string ?? urlString
+        return components.string ?? masked
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
