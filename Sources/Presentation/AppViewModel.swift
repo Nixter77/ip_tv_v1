@@ -82,6 +82,7 @@ public final class AppViewModel: ObservableObject {
         Publishers.CombineLatest3(
             $searchQuery
                 .removeDuplicates()
+                .map { String($0.prefix(512)) } // Ограничение длины запроса (DoS protection)
                 .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
             $selectedTab
                 .removeDuplicates(),

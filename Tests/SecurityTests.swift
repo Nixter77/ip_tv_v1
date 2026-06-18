@@ -100,4 +100,24 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_masksPathSegmentsWithEquals_evenWithQuery() {
+        let url = "http://server.com/auth=secret/video.m3u8?type=hls"
+        let masked = Stream.mask(url)
+
+        XCTAssertTrue(masked.contains("/auth=****"))
+        XCTAssertTrue(masked.contains("type=****"))
+        XCTAssertFalse(masked.contains("secret"))
+    }
+
+    func test_mask_failSecureRegex_handlesMalformedUrlsAndDelimiters() {
+        // Malformed URL that URLComponents might fail on
+        let malformed = "http://host.com/play|token=123;session=abc"
+        let masked = Stream.mask(malformed)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("session=****"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
 }
