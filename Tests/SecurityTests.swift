@@ -91,13 +91,41 @@ final class SecurityTests: XCTestCase {
         XCTAssertEqual(url?.fragment, "frag")
     }
 
-    func test_mask_handlesUrlsWithSpaces() {
+    func test_mask_handlesUnencodedSpaces() {
         let urlWithSpace = "http://example.com/play?token=secret password"
         let masked = Stream.mask(urlWithSpace)
 
-        // Ensure the token value is masked even if the URL had a space (which usually breaks URLComponents)
+        // Ensure the token value is masked even if the URL had a space
         XCTAssertTrue(masked.contains("token=****"))
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
+    }
+
+    func test_mask_handlesPathTokens() {
+        let urlWithPathToken = "http://example.com/auth=secret123/stream.m3u8"
+        let masked = Stream.mask(urlWithPathToken)
+
+        XCTAssertTrue(masked.contains("/auth=****/"))
+        XCTAssertFalse(masked.contains("secret123"))
+    }
+
+    func test_mask_handlesMultipleDelimiters() {
+        let complexUrl = "http://example.com/play;session=abc|user=jules?token=123"
+        let masked = Stream.mask(complexUrl)
+
+        XCTAssertTrue(masked.contains(";session=****"))
+        XCTAssertTrue(masked.contains("|user=****"))
+        XCTAssertTrue(masked.contains("?token=****"))
+        XCTAssertFalse(masked.contains("abc"))
+        XCTAssertFalse(masked.contains("jules"))
+        XCTAssertFalse(masked.contains("123"))
+    }
+
+    func test_mask_handlesFragmentTokens() {
+        let urlWithFragment = "http://example.com/stream#access_token=xyz789"
+        let masked = Stream.mask(urlWithFragment)
+
+        XCTAssertTrue(masked.contains("#access_token=****"))
+        XCTAssertFalse(masked.contains("xyz789"))
     }
 }

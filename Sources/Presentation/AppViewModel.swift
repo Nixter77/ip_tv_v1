@@ -27,7 +27,11 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
     @Published public var searchQuery: String = "" {
-        didSet { saveSearchQuery() }
+        didSet {
+            if searchQuery.count > 512 {
+                searchQuery = String(searchQuery.prefix(512))
+            }
+        }
     }
     @Published public var selectedTab: SidebarTab = .all {
         didSet { saveSelectedTab() }
@@ -79,10 +83,21 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
+        // Дебаунс для сохранения и фильтрации
+        let debouncedSearch = $searchQuery
+            .removeDuplicates()
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .share()
+
+        // Сохранение запроса в UserDefaults с дебаунсом (оптимизация Disk I/O)
+        debouncedSearch
+            .sink { [weak self] _ in
+                self?.saveSearchQuery()
+            }
+            .store(in: &cancellables)
+
         Publishers.CombineLatest3(
-            $searchQuery
-                .removeDuplicates()
-                .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
+            debouncedSearch,
             $selectedTab
                 .removeDuplicates(),
             $favoriteIds

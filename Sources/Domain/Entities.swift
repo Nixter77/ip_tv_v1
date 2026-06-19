@@ -83,52 +83,50 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         Self.mask(urlString)
     }
 
-    /// Masks sensitive information in a single URL string
+    /// Masks sensitive information in a single URL string for secure logging and UI display.
+    /// Uses a defense-in-depth approach with both URL parser and robust regex fallbacks.
     public static func mask(_ urlString: String) -> String {
-        // Attempt parsing. If it fails (e.g. due to spaces), try encoding it first (preserving #).
+        var result = urlString
+
+        // Step 1: Use URLComponents for structured credential masking if possible.
         var components = URLComponents(string: urlString)
         if components == nil, let encoded = urlString.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed) {
             components = URLComponents(string: encoded)
         }
 
-        guard var components = components, components.scheme != nil else {
-            // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
-            // for common credential patterns to avoid returning a raw URL that might contain tokens.
-            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+        if var components = components, components.scheme != nil {
+            if components.user != nil || components.password != nil {
+                components.user = "****"
+                if components.password != nil { components.password = "****" }
+                result = components.string ?? urlString
+            }
+        } else {
+            // Regex fallback for credentials in malformed URLs
+            result = result.replacingOccurrences(
+                of: #"://[^/@\s]+(?=@)"#,
+                with: "://****:****",
+                options: .regularExpression
+            )
         }
 
-        // Mask user credentials
-        if components.user != nil || components.password != nil {
-            components.user = "****"
-            if components.password != nil {
-                components.password = "****"
+        // Step 2: Robust regex masking for parameter values.
+        // This handles query items, path-based tokens, and fragments with any delimiter (?, &, /, |, ;, #).
+        // It preserves the key and masks the value, supporting unencoded spaces.
+        result = result.replacingOccurrences(
+            of: #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;#]+"#,
+            with: "$1=****",
+            options: .regularExpression
+        )
+
+        // Step 3: Mask simple fragments that don't contain key=value pairs (already handled above).
+        if let hashIndex = result.lastIndex(of: "#") {
+            let fragment = result[result.index(after: hashIndex)...]
+            if !fragment.isEmpty && !fragment.contains("/") && !fragment.contains("=") {
+                result = String(result[...hashIndex]) + "****"
             }
         }
 
-        // Mask query parameter values to protect session tokens/keys
-        if let queryItems = components.queryItems {
-            components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
-        }
-
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
-            components.path = components.path
-                .split(separator: "/", omittingEmptySubsequences: false)
-                .map { segment in
-                    guard let equalsIndex = segment.firstIndex(of: "=") else {
-                        return String(segment)
-                    }
-                    return String(segment[...equalsIndex]) + "****"
-                }
-                .joined(separator: "/")
-        }
-
-        // Mask fragments (anchors) as they often carry sensitive routing or session info
-        if components.fragment != nil {
-            components.fragment = "****"
-        }
-
-        return components.string ?? urlString
+        return result
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs

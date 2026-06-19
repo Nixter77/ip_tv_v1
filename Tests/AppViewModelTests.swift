@@ -139,6 +139,18 @@ final class AppViewModelTests: XCTestCase {
         let streams = await engine.streams(for: channel.id)
         XCTAssertEqual(player.state, .loading(stream: streams.first!))
     }
+
+    /// Test: Search query is limited to 512 characters
+    func test_searchQueryLengthLimit() async throws {
+        let vm = try XCTUnwrap(viewModel)
+
+        let longQuery = String(repeating: "a", count: 1000)
+        vm.searchQuery = longQuery
+
+        // Limit is now synchronous in didSet
+        XCTAssertEqual(vm.searchQuery.count, 512)
+        XCTAssertEqual(vm.searchQuery, String(longQuery.prefix(512)))
+    }
 }
 
 #endif
