@@ -158,15 +158,24 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
+            self.filteredChannels = await filterEngine.filter(
+                query: searchQuery,
+                category: nil,
+                country: nil,
+                language: nil,
+                matchingIds: favoriteIds
+            )
             return
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+            // Оптимизация: для истории получаем только 50 элементов вместо 50,000
+            let historyChannels = await filterEngine.getChannels(ids: historyIds)
+            if let query = searchQuery, !query.isEmpty {
+                // Если есть поиск, фильтруем локально (набор очень маленький, макс 50)
+                let queryLower = query.lowercased()
+                self.filteredChannels = historyChannels.filter { $0.name.lowercased().contains(queryLower) }
+            } else {
+                self.filteredChannels = historyChannels
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             return
         }
         
@@ -193,8 +202,11 @@ public final class AppViewModel: ObservableObject {
             updatePersistedFavorite(channelId: channelId, name: "", isFavorite: false)
         } else {
             favoriteIds.insert(channelId)
-            let channelName = filteredChannels.first(where: { $0.id == channelId })?.name ?? "Канал"
-            updatePersistedFavorite(channelId: channelId, name: channelName, isFavorite: true)
+            Task {
+                // Оптимизация: получаем имя канала напрямую из движка, а не поиском в текущем списке
+                let channelName = await filterEngine.getChannel(id: channelId)?.name ?? "Канал"
+                updatePersistedFavorite(channelId: channelId, name: channelName, isFavorite: true)
+            }
         }
     }
     
