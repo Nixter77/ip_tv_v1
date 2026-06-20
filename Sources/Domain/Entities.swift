@@ -111,7 +111,8 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         }
 
         // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        // We check for '=' in path segments to redact potential tokens even if query parameters exist.
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in
@@ -128,7 +129,14 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.fragment = "****"
         }
 
-        return components.string ?? urlString
+        let result = components.string ?? urlString
+
+        // Defense-in-depth: Regex-based redaction for parameter-like values that might be missed
+        // by structured parsing, especially with unusual delimiters like '|' or ';'.
+        // This targets: ?token=value, &key=value, /token=value, |token=value, ;token=value, #token=value
+        // Regex: (?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+
+        let defensePattern = #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+        return result.replacingOccurrences(of: defensePattern, with: "$1=****", options: .regularExpression)
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
