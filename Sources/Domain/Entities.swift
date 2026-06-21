@@ -110,8 +110,9 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
         }
 
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        // Some providers put token-like key=value data in path segments.
+        // We mask segments containing "=" for defense-in-depth.
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in
@@ -128,7 +129,17 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.fragment = "****"
         }
 
-        return components.string ?? urlString
+        let result = components.string ?? urlString
+
+        // Second layer: Robust regex pass to catch sensitive values with non-standard delimiters (e.g., |, ;)
+        // or cases where URLComponents failed to parse certain query/path parameters correctly.
+        let pattern = #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return result
+        }
+
+        let range = NSRange(result.startIndex..<result.endIndex, in: result)
+        return regex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=****")
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs

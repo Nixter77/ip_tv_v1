@@ -100,4 +100,28 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_handlesTokensInPathAndQuery() {
+        let complexUrl = "https://provider.com/auth=token123/stream.m3u8?key=abc456"
+        let masked = Stream.mask(complexUrl)
+
+        XCTAssertTrue(masked.contains("/auth=****"))
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertFalse(masked.contains("token123"))
+        XCTAssertFalse(masked.contains("abc456"))
+    }
+
+    func test_mask_handlesCustomDelimiters() {
+        let weirdUrl = "http://stream.tv/play?token=abc|key=123;session=xyz#frag=999"
+        let masked = Stream.mask(weirdUrl)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertTrue(masked.contains("session=****"))
+        XCTAssertTrue(masked.contains("frag=****"))
+        XCTAssertFalse(masked.contains("abc"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("xyz"))
+        XCTAssertFalse(masked.contains("999"))
+    }
 }
