@@ -7,3 +7,8 @@
 **Vulnerability:** URLs with unencoded spaces or special characters caused `URLComponents` parsing to fail, bypassing the sensitive data masking logic and leaking raw tokens in the UI.
 **Learning:** IPTV stream URLs often contain "dirty" data (unencoded spaces). `URLComponents` is strict and returns `nil` if parsing fails, so masking must handle pre-encoding to ensure robustness.
 **Prevention:** Always attempt to encode the URL string with a robust character set (including `#` for fragments) if initial parsing fails in masking or URL creation logic, ensuring that sensitive components can still be identified and redacted without breaking functionality.
+
+## 2024-05-30 - [Defense-in-Depth for Non-Standard URL Delimiters]
+**Vulnerability:** Some IPTV providers use non-standard delimiters (like `|` or `;`) or tokens embedded in path segments, which `URLComponents` fails to identify as sensitive parameters, leading to token leakage.
+**Learning:** Relying solely on structured URL parsers like `URLComponents` is insufficient for the diverse and often non-compliant URLs found in IPTV playlists. A multi-layered approach using both structured parsing and robust regular expressions is necessary.
+**Prevention:** Implement a regex-based second pass in URL masking logic (`(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+`) to catch parameter-like patterns regardless of the delimiter or URL structure, and ensure path segments containing `=` are always masked.

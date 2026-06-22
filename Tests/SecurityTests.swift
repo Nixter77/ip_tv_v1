@@ -100,4 +100,57 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_masksPathSegments_whenQueryIsPresent() {
+        // Path should be masked even if query parameters are present (defense-in-depth)
+        let url = "https://example.com/api/key=123/stream.m3u8?token=abc"
+        let masked = Stream.mask(url)
+
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
+
+    func test_mask_handlesNonStandardDelimiters() {
+        // Test for pipe and semicolon delimiters commonly used in IPTV URLs
+        let url = "https://example.com/play|token=secret;key=abc"
+        let masked = Stream.mask(url)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
+
+    func test_mask_masksFragments() {
+        let url = "https://example.com/stream#access_token=12345"
+        let masked = Stream.mask(url)
+
+        XCTAssertTrue(masked.contains("#****") || masked.contains("access_token=****"))
+        XCTAssertFalse(masked.contains("12345"))
+    }
+
+    @MainActor
+    func test_searchQuery_truncation_forDoSPrevention() async {
+        // AppViewModel requires SwiftData context which might be hard to mock here,
+        // but we can test the synchronous truncation in the property observer.
+
+        // Use a mock or just rely on the real one if it doesn't crash without SwiftData
+        let repository = IPTVRepository()
+        let filterEngine = ChannelFilterEngine()
+        let playerManager = PlayerStateManager()
+
+        let viewModel = AppViewModel(
+            repository: repository,
+            filterEngine: filterEngine,
+            playerManager: playerManager
+        )
+
+        let longQuery = String(repeating: "a", count: 1000)
+        viewModel.searchQuery = longQuery
+
+        XCTAssertEqual(viewModel.searchQuery.count, 512)
+        XCTAssertEqual(viewModel.searchQuery, String(longQuery.prefix(512)))
+    }
 }

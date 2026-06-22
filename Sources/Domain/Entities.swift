@@ -85,50 +85,55 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
     /// Masks sensitive information in a single URL string
     public static func mask(_ urlString: String) -> String {
-        // Attempt parsing. If it fails (e.g. due to spaces), try encoding it first (preserving #).
+        // 1. URLComponents approach for structured data
         var components = URLComponents(string: urlString)
         if components == nil, let encoded = urlString.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed) {
             components = URLComponents(string: encoded)
         }
 
-        guard var components = components, components.scheme != nil else {
-            // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
-            // for common credential patterns to avoid returning a raw URL that might contain tokens.
-            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
-        }
-
-        // Mask user credentials
-        if components.user != nil || components.password != nil {
-            components.user = "****"
-            if components.password != nil {
-                components.password = "****"
-            }
-        }
-
-        // Mask query parameter values to protect session tokens/keys
-        if let queryItems = components.queryItems {
-            components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
-        }
-
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
-            components.path = components.path
-                .split(separator: "/", omittingEmptySubsequences: false)
-                .map { segment in
-                    guard let equalsIndex = segment.firstIndex(of: "=") else {
-                        return String(segment)
-                    }
-                    return String(segment[...equalsIndex]) + "****"
+        var result: String
+        if var components = components, components.scheme != nil {
+            // Mask user credentials
+            if components.user != nil || components.password != nil {
+                components.user = "****"
+                if components.password != nil {
+                    components.password = "****"
                 }
-                .joined(separator: "/")
+            }
+
+            // Mask query parameter values
+            if let queryItems = components.queryItems {
+                components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
+            }
+
+            // Mask path segments containing '=' (unconditionally)
+            if components.path.contains("=") {
+                components.path = components.path
+                    .split(separator: "/", omittingEmptySubsequences: false)
+                    .map { segment in
+                        guard let equalsIndex = segment.firstIndex(of: "=") else {
+                            return String(segment)
+                        }
+                        return String(segment[...equalsIndex]) + "****"
+                    }
+                    .joined(separator: "/")
+            }
+
+            // Mask fragments
+            if components.fragment != nil {
+                components.fragment = "****"
+            }
+
+            result = components.string ?? urlString
+        } else {
+            // Fallback for parsing failure
+            result = urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
         }
 
-        // Mask fragments (anchors) as they often carry sensitive routing or session info
-        if components.fragment != nil {
-            components.fragment = "****"
-        }
-
-        return components.string ?? urlString
+        // 2. Regex-based approach for defense-in-depth (handles |, ;, malformed URLs)
+        // Redacts parameter values: key=value -> key=****
+        let parameterPattern = #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+        return result.replacingOccurrences(of: parameterPattern, with: "$1=****", options: .regularExpression)
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
