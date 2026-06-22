@@ -13,3 +13,7 @@
 ## 2026-05-31 - [Native macOS Interactions and Layout Stability]
 **Learning:** For macOS-native SwiftUI apps, favor `.opacity(isVisible ? 1 : 0)` over conditional rendering for interactive elements in rows to prevent layout jumps during hover and keep elements accessible. Implementing `.contextMenu` for secondary actions like "Copy Name" or "Toggle Favorite" improves desktop-native feel and discoverability.
 **Action:** Use `.opacity` for stable hover buttons and provide context menus for row-based actions.
+
+## 2026-06-01 - [Animated Status Indicators and Redundant A11y Noise]
+**Learning:** Using native `.symbolEffect(.variableColor.iterative, options: .repeating)` on SF Symbols (like `waveform`) provides a high-quality animated "Now Playing" state that feels native to macOS Sonoma+. When designing media HUDs, hiding decorative icons (like volume symbols) from screen readers while providing explicit labels on the functional controls (sliders) reduces cognitive load for accessibility users.
+**Action:** Use native symbol effects for status animations and prune redundant accessibility elements in dense HUDs.
