@@ -151,4 +151,52 @@ final class ChannelFilterEngineTests: XCTestCase {
         XCTAssertLessThan(filterDuration, 0.080, "Filter duration must be under 80ms in Debug mode")
         XCTAssertFalse(filtered.isEmpty)
     }
+
+    /// Тест: фильтрация по подмножеству ID (matchingIds)
+    func test_filterWithMatchingIds() async {
+        let channels = [
+            makeChannel(id: "ch1", name: "Alpha"),
+            makeChannel(id: "ch2", name: "Beta"),
+            makeChannel(id: "ch3", name: "Gamma")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        // Ограничиваем поиск только ch1 и ch3
+        let matching: Set<String> = ["ch1", "ch3"]
+
+        // Поиск по пустой строке в подмножестве
+        let filteredAll = await engine.filter(query: nil, matchingIds: matching)
+        XCTAssertEqual(filteredAll.count, 2)
+        XCTAssertTrue(filteredAll.contains(where: { $0.id == "ch1" }))
+        XCTAssertTrue(filteredAll.contains(where: { $0.id == "ch3" }))
+
+        // Поиск по запросу "Alpha" в подмножестве
+        let filteredAlpha = await engine.filter(query: "Alpha", matchingIds: matching)
+        XCTAssertEqual(filteredAlpha.count, 1)
+        XCTAssertEqual(filteredAlpha.first?.id, "ch1")
+
+        // Поиск по запросу "Beta" в подмножестве (должен быть пуст, так как Beta нет в matchingIds)
+        let filteredBeta = await engine.filter(query: "Beta", matchingIds: matching)
+        XCTAssertTrue(filteredBeta.isEmpty)
+    }
+
+    /// Тест: получение каналов в заданном порядке (getChannels)
+    func test_getChannelsOrder() async {
+        let channels = [
+            makeChannel(id: "ch1", name: "Alpha"),
+            makeChannel(id: "ch2", name: "Beta"),
+            makeChannel(id: "ch3", name: "Gamma")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        // Запрашиваем в обратном порядке
+        let ids = ["ch3", "ch1"]
+        let result = await engine.getChannels(ids: ids)
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].id, "ch3")
+        XCTAssertEqual(result[1].id, "ch1")
+    }
 }
