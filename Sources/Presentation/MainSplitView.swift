@@ -326,6 +326,11 @@ public struct MainSplitView: View {
                         onToggleFavorite: {
                             viewModel.toggleFavorite(channelId: channel.id)
                         },
+                        onRetry: {
+                            Task {
+                                await viewModel.play(channel: channel)
+                            }
+                        },
                         preferredBitrate: Binding(
                             get: { viewModel.playerManager.preferredBitrate },
                             set: { viewModel.playerManager.preferredBitrate = $0 }
