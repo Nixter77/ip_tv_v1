@@ -100,4 +100,37 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_handlesPathAndQueryTogether() {
+        let complexUrl = "http://example.com/api/v1/auth=token123/stream?key=abc"
+        let masked = Stream.mask(complexUrl)
+
+        XCTAssertTrue(masked.contains("/auth=****"))
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertFalse(masked.contains("token123"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
+
+    func test_mask_handlesUnconventionalDelimiters() {
+        // Some IPTV providers use | or ; as delimiters
+        let urlWithPipe = "http://example.com/play?token=123|uid=456;sid=789"
+        let masked = Stream.mask(urlWithPipe)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("uid=****"))
+        XCTAssertTrue(masked.contains("sid=****"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("456"))
+        XCTAssertFalse(masked.contains("789"))
+    }
+
+    func test_mask_handlesFragments() {
+        let urlWithFragment = "http://example.com/play#session=secret"
+        let masked = Stream.mask(urlWithFragment)
+
+        // URLComponents fragment masking replaces entire fragment with ****,
+        // our regex provides secondary protection if it was structured.
+        XCTAssertTrue(masked.contains("#****") || masked.contains("#session=****"))
+        XCTAssertFalse(masked.contains("secret"))
+    }
 }

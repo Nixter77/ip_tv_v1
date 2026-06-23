@@ -111,7 +111,7 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         }
 
         // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in
@@ -128,7 +128,12 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.fragment = "****"
         }
 
-        return components.string ?? urlString
+        let result = components.string ?? urlString
+
+        // Defense-in-depth: regex-based mask for parameter values that might use non-standard delimiters (|, ;)
+        // or were otherwise missed by URLComponents (e.g. in fragments).
+        let deepPattern = #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+        return result.replacingOccurrences(of: deepPattern, with: "$1=****", options: .regularExpression)
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
