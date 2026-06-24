@@ -91,49 +91,60 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components = URLComponents(string: encoded)
         }
 
-        guard var components = components, components.scheme != nil else {
-            // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
-            // for common credential patterns to avoid returning a raw URL that might contain tokens.
-            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
-        }
-
-        // Mask user credentials
-        if components.user != nil || components.password != nil {
-            components.user = "****"
-            if components.password != nil {
-                components.password = "****"
-            }
-        }
-
-        // Mask query parameter values to protect session tokens/keys
-        if let queryItems = components.queryItems {
-            components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
-        }
-
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
-            components.path = components.path
-                .split(separator: "/", omittingEmptySubsequences: false)
-                .map { segment in
-                    guard let equalsIndex = segment.firstIndex(of: "=") else {
-                        return String(segment)
-                    }
-                    return String(segment[...equalsIndex]) + "****"
+        // 1. Structured masking using URLComponents
+        if var structuredComponents = components, structuredComponents.scheme != nil {
+            // Mask user credentials
+            if structuredComponents.user != nil || structuredComponents.password != nil {
+                structuredComponents.user = "****"
+                if structuredComponents.password != nil {
+                    structuredComponents.password = "****"
                 }
-                .joined(separator: "/")
-        }
+            }
 
-        // Mask fragments (anchors) as they often carry sensitive routing or session info
-        if components.fragment != nil {
-            components.fragment = "****"
-        }
+            // Mask query parameter values to protect session tokens/keys
+            if let queryItems = structuredComponents.queryItems {
+                structuredComponents.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
+            }
 
-        return components.string ?? urlString
+            // Mask fragments (anchors) as they often carry sensitive routing or session info
+            if structuredComponents.fragment != nil {
+                structuredComponents.fragment = "****"
+            }
+
+            // structuredComponents.string might still fail if the original string was malformed
+            let structuredString = structuredComponents.string ?? urlString
+
+            // 2. Defense-in-depth: Regex masking for path segments and unconventional parameters
+            // This catches tokens embedded in paths (e.g., /token=123/) or using delimiters like ; or |
+            return maskSensitiveParameters(in: structuredString)
+        } else {
+            // Fail-secure: If parsing fails even after encoding, try regex-based mask
+            let maskedAuth = urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+            return maskSensitiveParameters(in: maskedAuth)
+        }
+    }
+
+    /// Redacts values in 'key=value' patterns using a robust regex.
+    /// Supports delimiters like /, ?, &, ;, |, #
+    private static func maskSensitiveParameters(in text: String) -> String {
+        // Regex explanation:
+        // (?<=[?&/|;#])    - Lookbehind for common delimiters (start of parameter)
+        // ([^?&/|;=\s#]+)  - Match the key (group 1): any chars except delimiters, =, or space
+        // =                - The separator
+        // [^?&/|;\s#]+     - Match the value: any chars until the next delimiter or space
+        let pattern = #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+
+        return text.replacingOccurrences(
+            of: pattern,
+            with: "$1=****",
+            options: .regularExpression
+        )
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
     public static func maskURLs(in text: String) -> String {
-        let pattern = #"https?://[^\s]+"#
+        // Improved pattern to avoid trailing punctuation often found in error messages
+        let pattern = #"https?://[^\s,;()<>\[\]{}'"]+"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return text
         }

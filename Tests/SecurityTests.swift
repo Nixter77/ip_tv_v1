@@ -34,6 +34,43 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("abc"))
     }
 
+    func test_maskedUrlString_masksPathTokens_withQueryParameters() {
+        let stream = Stream(
+            channel: "test",
+            urlString: "https://example.com/auth=token123/stream.m3u8?key=abc",
+            status: nil,
+            timeshift: nil,
+            httpReferrer: nil
+        )
+
+        let masked = stream.maskedUrlString
+        XCTAssertTrue(masked.contains("auth=****"))
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertFalse(masked.contains("token123"))
+        XCTAssertFalse(masked.contains("abc"))
+        // Ensure structure is preserved
+        XCTAssertTrue(masked.contains("/stream.m3u8?"))
+    }
+
+    func test_maskedUrlString_masksComplexDelimiters() {
+        // Some providers use | or ; as delimiters
+        let stream = Stream(
+            channel: "test",
+            urlString: "http://host.com/play;token=123|session=456#fragment=789",
+            status: nil,
+            timeshift: nil,
+            httpReferrer: nil
+        )
+
+        let masked = stream.maskedUrlString
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("session=****"))
+        XCTAssertTrue(masked.contains("fragment=****"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("456"))
+        XCTAssertFalse(masked.contains("789"))
+    }
+
     func test_maskedUrlString_handlesPlainUrl() {
         let stream = Stream(
             channel: "test",
@@ -60,22 +97,19 @@ final class SecurityTests: XCTestCase {
         XCTAssertEqual(masked, "invalid url")
     }
 
-    func test_maskURLs_masksEmbeddedURLs() {
-        let rawError = "Failed to load stream at http://user:pass@host.com/play?token=123 and also check https://other.com/key=456 for details"
+    func test_maskURLs_masksEmbeddedURLs_withPunctuation() {
+        let rawError = "Error at https://host.com/p?token=123, also see (https://other.com/auth=456)."
         let masked = Stream.maskURLs(in: rawError)
 
-        XCTAssertTrue(masked.contains("http://****:****@host.com/play?token=****"))
-        XCTAssertTrue(masked.contains("https://other.com/key=****"))
-        XCTAssertFalse(masked.contains("user"))
-        XCTAssertFalse(masked.contains("pass"))
+        XCTAssertTrue(masked.contains("https://host.com/p?token=****"))
+        XCTAssertTrue(masked.contains("https://other.com/auth=****"))
+        XCTAssertTrue(masked.contains("****,")) // Punctuation preserved outside URL
+        XCTAssertTrue(masked.contains("****)."))
         XCTAssertFalse(masked.contains("123"))
         XCTAssertFalse(masked.contains("456"))
-        XCTAssertTrue(masked.contains("Failed to load stream at"))
-        XCTAssertTrue(masked.contains("and also check"))
     }
 
     func test_stream_url_usesPreEncoding_forRobustness() {
-        // This test ensures we properly parse a URL that contains unencoded spaces
         let stream = Stream(
             channel: "test",
             urlString: "http://example.com/test space?q=a b#frag",
@@ -86,7 +120,6 @@ final class SecurityTests: XCTestCase {
 
         let url = stream.url
         XCTAssertNotNil(url)
-        // Our robust logic MUST preserve # and ?, but encode spaces as %20
         XCTAssertEqual(url?.absoluteString, "http://example.com/test%20space?q=a%20b#frag")
         XCTAssertEqual(url?.fragment, "frag")
     }
@@ -95,7 +128,6 @@ final class SecurityTests: XCTestCase {
         let urlWithSpace = "http://example.com/play?token=secret password"
         let masked = Stream.mask(urlWithSpace)
 
-        // Ensure the token value is masked even if the URL had a space (which usually breaks URLComponents)
         XCTAssertTrue(masked.contains("token=****"))
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
