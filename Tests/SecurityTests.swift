@@ -100,4 +100,31 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_masksPathAndQueryTogether() {
+        let url = "https://example.com/auth=secret_token/stream?key=val"
+        let masked = Stream.mask(url)
+
+        XCTAssertEqual(masked, "https://example.com/auth=****/stream?key=****")
+    }
+
+    func test_mask_masksFragmentParameters() {
+        let url = "https://example.com/stream#token=abc&session=123"
+        let masked = Stream.mask(url)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("session=****"))
+        XCTAssertFalse(masked.contains("abc"))
+        XCTAssertFalse(masked.contains("123"))
+    }
+
+    func test_maskURLs_handlesTrailingPunctuation() {
+        let text = "Error at https://host.com/p?t=123, and (https://other.com/key=456)."
+        let masked = Stream.maskURLs(in: text)
+
+        XCTAssertTrue(masked.contains("https://host.com/p?t=****,"))
+        XCTAssertTrue(masked.contains("(https://other.com/key=****)."))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("456"))
+    }
 }

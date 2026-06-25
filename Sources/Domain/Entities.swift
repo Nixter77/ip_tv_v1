@@ -91,49 +91,35 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components = URLComponents(string: encoded)
         }
 
-        guard var components = components, components.scheme != nil else {
+        var result: String
+        if var components = components, components.scheme != nil {
+            // Mask user credentials
+            if components.user != nil || components.password != nil {
+                components.user = "****"
+                if components.password != nil {
+                    components.password = "****"
+                }
+            }
+            result = components.string ?? urlString
+        } else {
             // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
             // for common credential patterns to avoid returning a raw URL that might contain tokens.
-            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+            result = urlString.replacingOccurrences(of: #"://[^@\s]+@"#, with: "://****@", options: .regularExpression)
         }
 
-        // Mask user credentials
-        if components.user != nil || components.password != nil {
-            components.user = "****"
-            if components.password != nil {
-                components.password = "****"
-            }
-        }
-
-        // Mask query parameter values to protect session tokens/keys
-        if let queryItems = components.queryItems {
-            components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
-        }
-
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
-            components.path = components.path
-                .split(separator: "/", omittingEmptySubsequences: false)
-                .map { segment in
-                    guard let equalsIndex = segment.firstIndex(of: "=") else {
-                        return String(segment)
-                    }
-                    return String(segment[...equalsIndex]) + "****"
-                }
-                .joined(separator: "/")
-        }
-
-        // Mask fragments (anchors) as they often carry sensitive routing or session info
-        if components.fragment != nil {
-            components.fragment = "****"
-        }
-
-        return components.string ?? urlString
+        // Secondary Pass: Use regex to redact all key=value parameter values across path, query, and fragments.
+        // This provides defense-in-depth for IPTV providers that embed tokens in path segments (e.g. /key=val/)
+        // or use non-standard delimiters that URLComponents might miss.
+        // Pattern matches: boundary delimiter followed by key name, equals sign, and the sensitive value.
+        let paramPattern = #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+        return result.replacingOccurrences(of: paramPattern, with: "$1=****", options: .regularExpression)
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
     public static func maskURLs(in text: String) -> String {
-        let pattern = #"https?://[^\s]+"#
+        // Use a more restrictive pattern to avoid including trailing punctuation (like commas or brackets)
+        // that are often present in log messages or unstructured error text.
+        let pattern = #"https?://[^\s,;()<>[\]{}'"]+"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return text
         }
