@@ -13,3 +13,7 @@
 ## 2026-05-31 - [Native macOS Interactions and Layout Stability]
 **Learning:** For macOS-native SwiftUI apps, favor `.opacity(isVisible ? 1 : 0)` over conditional rendering for interactive elements in rows to prevent layout jumps during hover and keep elements accessible. Implementing `.contextMenu` for secondary actions like "Copy Name" or "Toggle Favorite" improves desktop-native feel and discoverability.
 **Action:** Use `.opacity` for stable hover buttons and provide context menus for row-based actions.
+
+## 2026-06-01 - [Streamlining Media Controls Accessibility]
+**Learning:** In media player HUDs with adjacent icon-and-slider pairs (like Volume), the icon should be hidden from accessibility services (`.accessibilityHidden(true)`) while the slider itself receives a descriptive label. This prevents redundant announcements and focuses the screen reader on the interactive element.
+**Action:** Hide decorative status icons next to sliders and label the slider directly.

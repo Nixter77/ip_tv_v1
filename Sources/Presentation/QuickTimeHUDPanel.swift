@@ -140,16 +140,20 @@ public struct QuickTimeHUDPanel: View {
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
+                .help(isPlaying ? "Пауза" : "Воспроизвести")
+                .accessibilityLabel(isPlaying ? "Пауза" : "Воспроизвести")
 
                 HStack(spacing: 4) {
                     Image(systemName: volumeIcon)
                         .font(.system(size: 13))
                         .frame(width: 18)
+                        .accessibilityHidden(true)
                     Slider(value: $volume, in: 0...1) { _ in
                         player.volume = volume
                     }
                     .frame(width: 80)
                     .controlSize(.mini)
+                    .accessibilityLabel("Громкость")
                 }
 
                 Spacer()
@@ -173,6 +177,8 @@ public struct QuickTimeHUDPanel: View {
                     .pickerStyle(.menu)
                     .frame(width: 64)
                     .scaleEffect(0.85)
+                    .help("Выбор качества")
+                    .accessibilityLabel("Выбор качества потока")
                 }
 
                 if let detach = onDetachPlayer {
@@ -182,6 +188,7 @@ public struct QuickTimeHUDPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help("Смотреть в отдельном окне")
+                    .accessibilityLabel("Смотреть в отдельном окне")
                 }
 
                 if let fullscreen = onToggleFullscreen {
@@ -191,6 +198,7 @@ public struct QuickTimeHUDPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help("Во весь экран")
+                    .accessibilityLabel("Во весь экран")
                 }
 
                 if let fav = onToggleFavorite {
@@ -201,6 +209,7 @@ public struct QuickTimeHUDPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
+                    .accessibilityLabel(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
                 }
             }
             .padding(.horizontal, 14)
