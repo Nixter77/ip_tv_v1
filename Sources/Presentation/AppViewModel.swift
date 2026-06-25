@@ -158,12 +158,28 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
+            // Оптимизация: передаем favoriteIds напрямую в filterEngine, чтобы фильтрация шла внутри актора
+            self.filteredChannels = await filterEngine.filter(
+                query: searchQuery,
+                category: nil,
+                country: nil,
+                language: nil,
+                matchingIds: favoriteIds
+            )
             return
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
+            // Оптимизация: передаем historyIds (как Set) в filterEngine.
+            // Получаем только те каналы из истории, которые соответствуют поисковому запросу.
+            let matchedHistoryChannels = await filterEngine.filter(
+                query: searchQuery,
+                category: nil,
+                country: nil,
+                language: nil,
+                matchingIds: Set(historyIds)
+            )
+
+            // Сохраняем оригинальный порядок истории (от новых к старым)
+            let channelMap = matchedHistoryChannels.reduce(into: [String: Channel](minimumCapacity: matchedHistoryChannels.count)) { map, channel in
                 map[channel.id] = channel
             }
             self.filteredChannels = historyIds.compactMap { channelMap[$0] }
