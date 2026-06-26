@@ -13,3 +13,7 @@
 ## 2026-05-31 - [Native macOS Interactions and Layout Stability]
 **Learning:** For macOS-native SwiftUI apps, favor `.opacity(isVisible ? 1 : 0)` over conditional rendering for interactive elements in rows to prevent layout jumps during hover and keep elements accessible. Implementing `.contextMenu` for secondary actions like "Copy Name" or "Toggle Favorite" improves desktop-native feel and discoverability.
 **Action:** Use `.opacity` for stable hover buttons and provide context menus for row-based actions.
+
+## 2026-06-26 - [Playback Feedback and HUD Accessibility]
+**Learning:** In high-density macOS media applications, providing both `.accessibilityLabel` (for screen readers) and `.help` (for native tooltips) on icon-only buttons is critical for professional accessibility compliance and user discovery. Additionally, visual feedback for the active stream (e.g., an animated waveform) in the channel list helps users quickly identify what's playing in complex, multi-pane layouts.
+**Action:** Always pair tooltips with accessibility labels and provide persistent visual indicators for active playback states in lists.

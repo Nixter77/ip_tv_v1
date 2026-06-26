@@ -10,6 +10,16 @@ public enum PlayerState: Equatable, Sendable {
     case loading(stream: Stream)
     case playing(stream: Stream)
     case failed(stream: Stream, error: String)
+
+    /// Флаг активности (загрузка или воспроизведение)
+    public var isActive: Bool {
+        switch self {
+        case .loading(_), .playing(_):
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 /// Управление воспроизведением и авто-фолбэками

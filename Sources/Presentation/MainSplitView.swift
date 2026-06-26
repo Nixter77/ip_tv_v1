@@ -270,6 +270,7 @@ public struct MainSplitView: View {
                     ChannelRowView(
                         channel: channel,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
+                        isActive: viewModel.playerManager.currentChannel?.id == channel.id && viewModel.playerManager.state.isActive,
                         onFavoriteToggle: {
                             viewModel.toggleFavorite(channelId: channel.id)
                         }
@@ -360,10 +361,18 @@ public struct MainSplitView: View {
 struct ChannelRowView: View {
     let channel: Channel
     let isFavorite: Bool
+    let isActive: Bool
     let onFavoriteToggle: () -> Void
     
     @State private var isHovered = false
     
+    public init(channel: Channel, isFavorite: Bool, isActive: Bool = false, onFavoriteToggle: @escaping () -> Void) {
+        self.channel = channel
+        self.isFavorite = isFavorite
+        self.isActive = isActive
+        self.onFavoriteToggle = onFavoriteToggle
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // Логотип с AsyncImage и кастомным Gradient Placeholder
@@ -396,9 +405,19 @@ struct ChannelRowView: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(channel.name)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(channel.name)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+
+                    if isActive {
+                        Image(systemName: "waveform")
+                            .symbolEffect(.variableColor.iterative)
+                            .foregroundColor(.blue)
+                            .help("Сейчас воспроизводится")
+                            .accessibilityLabel("Сейчас воспроизводится")
+                    }
+                }
                 
                 HStack(spacing: 8) {
                     if let country = channel.country {
