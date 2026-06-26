@@ -79,20 +79,37 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
-        Publishers.CombineLatest3(
+        // 1. Основной поток обновления (поиск и вкладки)
+        Publishers.CombineLatest(
             $searchQuery
                 .removeDuplicates()
                 .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
             $selectedTab
-                .removeDuplicates(),
-            $favoriteIds
                 .removeDuplicates()
         )
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
-                Task {
-                    await self?.updateFilteredChannels()
-                }
+            .sink { [weak self] _, _ in
+                Task { await self?.updateFilteredChannels() }
+            }
+            .store(in: &cancellables)
+
+        // 2. Обновление при изменении избранного (только если открыта вкладка Избранное)
+        $favoriteIds
+            .removeDuplicates()
+            .filter { [weak self] _ in self?.selectedTab == .favorites }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { await self?.updateFilteredChannels() }
+            }
+            .store(in: &cancellables)
+
+        // 3. Обновление при изменении истории (только если открыта вкладка История)
+        $historyIds
+            .removeDuplicates()
+            .filter { [weak self] _ in self?.selectedTab == .history }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { await self?.updateFilteredChannels() }
             }
             .store(in: &cancellables)
             
@@ -147,6 +164,7 @@ public final class AppViewModel: ObservableObject {
         var categoryFilter: String?
         var countryFilter: String?
         var languageFilter: String?
+        var matchingIds: Set<String>?
         
         switch selectedTab {
         case .all:
@@ -158,24 +176,26 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
+            matchingIds = favoriteIds
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
-            }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
+            matchingIds = Set(historyIds)
         }
         
-        self.filteredChannels = await filterEngine.filter(
+        let results = await filterEngine.filter(
             query: searchQuery,
             category: categoryFilter,
             country: countryFilter,
-            language: languageFilter
+            language: languageFilter,
+            matchingIds: matchingIds
         )
+
+        // Для истории восстанавливаем хронологический порядок на основе historyIds
+        if case .history = selectedTab {
+            let channelMap = results.reduce(into: [String: Channel](minimumCapacity: results.count)) { $0[$1.id] = $1 }
+            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
+        } else {
+            self.filteredChannels = results
+        }
     }
     
     /// Начать воспроизведение выбранного канала

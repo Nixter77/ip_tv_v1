@@ -57,7 +57,7 @@ final class ChannelFilterEngineTests: XCTestCase {
         
         await engine.setup(channels: channels, streams: streams)
         
-        let filtered = await engine.filter(query: nil, category: nil, country: "US", language: "eng")
+        let filtered = await engine.filter(query: nil, category: nil, country: "US", language: "eng", matchingIds: nil)
         
         XCTAssertEqual(filtered.count, 1)
         XCTAssertEqual(filtered.first?.id, "us.eng.news")
@@ -75,7 +75,7 @@ final class ChannelFilterEngineTests: XCTestCase {
         await engine.setup(channels: channels, streams: streams)
         
         // Поиск "new" должен вернуть "CNN Newsline" и "Sky News" (так как "Newsline" и "News" начинаются с "new")
-        let filtered = await engine.filter(query: "new", category: nil, country: nil, language: nil)
+        let filtered = await engine.filter(query: "new", category: nil, country: nil, language: nil, matchingIds: nil)
         
         XCTAssertEqual(filtered.count, 2)
         let ids = Set(filtered.map { $0.id })
@@ -95,12 +95,12 @@ final class ChannelFilterEngineTests: XCTestCase {
         await engine.setup(channels: channels, streams: streams)
         
         // Поиск "ct" должен найти "ČT 1"
-        let filteredCT = await engine.filter(query: "ct", category: nil, country: nil, language: nil)
+        let filteredCT = await engine.filter(query: "ct", category: nil, country: nil, language: nil, matchingIds: nil)
         XCTAssertEqual(filteredCT.count, 1)
         XCTAssertEqual(filteredCT.first?.id, "ct1")
         
         // Поиск "rte" должен найти "RTÉ One"
-        let filteredRTE = await engine.filter(query: "rte", category: nil, country: nil, language: nil)
+        let filteredRTE = await engine.filter(query: "rte", category: nil, country: nil, language: nil, matchingIds: nil)
         XCTAssertEqual(filteredRTE.count, 1)
         XCTAssertEqual(filteredRTE.first?.id, "rte")
     }
@@ -141,7 +141,8 @@ final class ChannelFilterEngineTests: XCTestCase {
             query: "space",
             category: "news",
             country: "US",
-            language: "eng"
+            language: "eng",
+            matchingIds: nil
         )
         let filterDuration = CFAbsoluteTimeGetCurrent() - filterStart
         
@@ -150,5 +151,30 @@ final class ChannelFilterEngineTests: XCTestCase {
         // Проверяем требования к производительности (< 80 мс в Debug)
         XCTAssertLessThan(filterDuration, 0.080, "Filter duration must be under 80ms in Debug mode")
         XCTAssertFalse(filtered.isEmpty)
+    }
+
+    /// Тест: фильтрация с использованием matchingIds (ограничение области поиска)
+    func test_filterWithMatchingIds() async {
+        let channels = [
+            makeChannel(id: "1", name: "Channel 1"),
+            makeChannel(id: "2", name: "Channel 2"),
+            makeChannel(id: "3", name: "Channel 3")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        let matchingIds: Set<String> = ["1", "3"]
+
+        // Поиск по всему (query=nil) с matchingIds
+        let filteredAll = await engine.filter(query: nil, category: nil, country: nil, language: nil, matchingIds: matchingIds)
+        XCTAssertEqual(filteredAll.count, 2)
+        XCTAssertTrue(filteredAll.contains(where: { $0.id == "1" }))
+        XCTAssertTrue(filteredAll.contains(where: { $0.id == "3" }))
+        XCTAssertFalse(filteredAll.contains(where: { $0.id == "2" }))
+
+        // Поиск с query и matchingIds
+        let filteredQuery = await engine.filter(query: "3", category: nil, country: nil, language: nil, matchingIds: matchingIds)
+        XCTAssertEqual(filteredQuery.count, 1)
+        XCTAssertEqual(filteredQuery.first?.id, "3")
     }
 }

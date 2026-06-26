@@ -15,3 +15,11 @@
 ## 2024-05-31 - [Optimization] Debounced Search and Granular Persistence
 **Learning:** In SwiftUI ViewModels using Combine, chaining multiple state properties into a single pipeline can cause explosive redundant work. Debouncing and duplicate removal are essential for search inputs. Furthermore, coupling simple state persistence (strings) with complex state persistence (JSON) in a single method creates unnecessary encoding overhead.
 **Action:** Always debounce search inputs and use granular persistence methods to avoid expensive encoding for simple property changes.
+
+## 2026-06-26 - Subset Search Pruning
+**Learning:** In high-concurrency apps with large datasets (50k+), performing subset-specific filtering (like Favorites or History) on the MainActor after a full database search is a major bottleneck. Offloading the subset constraint () directly to the specialized FilterEngine actor allows for immediate pruning of the search space and avoids expensive data transfer and post-processing on the UI thread.
+**Action:** Always provide a way to pass a pre-defined ID set to search/filter engines to minimize work and cross-actor overhead.
+
+## 2026-06-26 - Subset Search Pruning
+**Learning:** In high-concurrency apps with large datasets (50k+), performing subset-specific filtering (like Favorites or History) on the MainActor after a full database search is a major bottleneck. Offloading the subset constraint (matchingIds) directly to the specialized FilterEngine actor allows for immediate pruning of the search space and avoids expensive data transfer and post-processing on the UI thread.
+**Action:** Always provide a way to pass a pre-defined ID set to search/filter engines to minimize work and cross-actor overhead.
