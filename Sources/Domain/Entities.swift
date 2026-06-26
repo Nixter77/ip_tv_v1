@@ -111,7 +111,7 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         }
 
         // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
+        if components.path.contains("=") {
             components.path = components.path
                 .split(separator: "/", omittingEmptySubsequences: false)
                 .map { segment in
@@ -133,7 +133,7 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
     public static func maskURLs(in text: String) -> String {
-        let pattern = #"https?://[^\s]+"#
+        let pattern = #"https?://[^\s,;()<>[\]{}'"]+"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return text
         }
