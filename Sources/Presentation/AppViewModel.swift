@@ -26,9 +26,7 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 @MainActor
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
-    @Published public var searchQuery: String = "" {
-        didSet { saveSearchQuery() }
-    }
+    @Published public var searchQuery: String = ""
     @Published public var selectedTab: SidebarTab = .all {
         didSet { saveSelectedTab() }
     }
@@ -90,6 +88,7 @@ public final class AppViewModel: ObservableObject {
         )
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _, _, _ in
+                self?.saveSearchQuery()
                 Task {
                     await self?.updateFilteredChannels()
                 }
@@ -148,6 +147,8 @@ public final class AppViewModel: ObservableObject {
         var countryFilter: String?
         var languageFilter: String?
         
+        var matchingIds: Set<String>?
+
         switch selectedTab {
         case .all:
             break
@@ -158,24 +159,28 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
+            matchingIds = favoriteIds
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
-            }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
+            matchingIds = Set(historyIds)
         }
         
-        self.filteredChannels = await filterEngine.filter(
+        let result = await filterEngine.filter(
             query: searchQuery,
             category: categoryFilter,
             country: countryFilter,
-            language: languageFilter
+            language: languageFilter,
+            matchingIds: matchingIds
         )
+
+        if case .history = selectedTab {
+            // Для Истории восстанавливаем хронологический порядок
+            let channelMap = result.reduce(into: [String: Channel](minimumCapacity: result.count)) { map, channel in
+                map[channel.id] = channel
+            }
+            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
+        } else {
+            self.filteredChannels = result
+        }
     }
     
     /// Начать воспроизведение выбранного канала
