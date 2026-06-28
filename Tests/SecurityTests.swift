@@ -100,4 +100,42 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_masksPathAndQueryTogether() {
+        let complexUrl = "https://example.com/api/v1/auth=secretToken/stream.m3u8?user=admin&session=123"
+        let masked = Stream.mask(complexUrl)
+
+        XCTAssertTrue(masked.contains("/auth=****"))
+        XCTAssertTrue(masked.contains("user=****"))
+        XCTAssertTrue(masked.contains("session=****"))
+        XCTAssertFalse(masked.contains("secretToken"))
+        XCTAssertFalse(masked.contains("admin"))
+        XCTAssertFalse(masked.contains("123"))
+    }
+
+    func test_mask_handlesNonStandardDelimiters() {
+        let pipeUrl = "https://example.com/play|token=secret|key=val"
+        let masked = Stream.mask(pipeUrl)
+
+        XCTAssertTrue(masked.contains("|token=****"))
+        XCTAssertTrue(masked.contains("|key=****"))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("val"))
+
+        let semicolonUrl = "https://example.com/play;session=999;group=A"
+        let maskedSemi = Stream.mask(semicolonUrl)
+        XCTAssertTrue(maskedSemi.contains(";session=****"))
+        XCTAssertTrue(maskedSemi.contains(";group=****"))
+        XCTAssertFalse(maskedSemi.contains("999"))
+    }
+
+    func test_maskURLs_handlesTrailingPunctuation() {
+        let text = "Check this URL: https://example.com/play?token=123, and this one (https://example.com/auth=456)."
+        let masked = Stream.maskURLs(in: text)
+
+        XCTAssertTrue(masked.contains("https://example.com/play?token=****,"))
+        XCTAssertTrue(masked.contains("(https://example.com/auth=****)."))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("456"))
+    }
 }

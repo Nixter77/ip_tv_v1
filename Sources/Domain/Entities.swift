@@ -110,30 +110,29 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
         }
 
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
-            components.path = components.path
-                .split(separator: "/", omittingEmptySubsequences: false)
-                .map { segment in
-                    guard let equalsIndex = segment.firstIndex(of: "=") else {
-                        return String(segment)
-                    }
-                    return String(segment[...equalsIndex]) + "****"
-                }
-                .joined(separator: "/")
-        }
-
         // Mask fragments (anchors) as they often carry sensitive routing or session info
         if components.fragment != nil {
             components.fragment = "****"
         }
 
-        return components.string ?? urlString
+        var result = components.string ?? urlString
+
+        // Secondary defense-in-depth: Some providers put token-like key=value data in path segments,
+        // or use non-standard delimiters like '|' or ';' which URLComponents might not fully mask.
+        // We use a regex to find any key=value pairs and redact the values while preserving keys.
+        // The pattern ensures we only match values following delimiters: ? & / | ; #
+        let sensitivePattern = #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+        if let regex = try? NSRegularExpression(pattern: sensitivePattern) {
+            let fullRange = NSRange(result.startIndex..<result.endIndex, in: result)
+            result = regex.stringByReplacingMatches(in: result, range: fullRange, withTemplate: "$1=****")
+        }
+
+        return result
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
     public static func maskURLs(in text: String) -> String {
-        let pattern = #"https?://[^\s]+"#
+        let pattern = #"https?://[^\s,;()<>[\]{}'"]+"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return text
         }
