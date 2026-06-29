@@ -74,6 +74,18 @@ final class SecurityTests: XCTestCase {
         XCTAssertTrue(masked.contains("and also check"))
     }
 
+    func test_maskURLs_handlesTrailingPunctuation() {
+        let text = "Check this URL: https://example.com/play?token=secret, and this one (https://other.com/key=123); or [https://third.com/auth=abc]."
+        let masked = Stream.maskURLs(in: text)
+
+        XCTAssertTrue(masked.contains("https://example.com/play?token=****,"))
+        XCTAssertTrue(masked.contains("(https://other.com/key=****);"))
+        XCTAssertTrue(masked.contains("[https://third.com/auth=****]."))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
+
     func test_stream_url_usesPreEncoding_forRobustness() {
         // This test ensures we properly parse a URL that contains unencoded spaces
         let stream = Stream(
@@ -99,5 +111,26 @@ final class SecurityTests: XCTestCase {
         XCTAssertTrue(masked.contains("token=****"))
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
+    }
+
+    func test_mask_masksPathAndQueryTogether() {
+        let complexUrl = "https://provider.com/auth=abc123/stream.m3u8?token=xyz789"
+        let masked = Stream.mask(complexUrl)
+
+        XCTAssertEqual(masked, "https://provider.com/auth=****/stream.m3u8?token=****")
+        XCTAssertFalse(masked.contains("abc123"))
+        XCTAssertFalse(masked.contains("xyz789"))
+    }
+
+    func test_mask_handlesNonStandardDelimiters() {
+        let pipedUrl = "http://server.net/play|user=joe|pass=123;token=999"
+        let masked = Stream.mask(pipedUrl)
+
+        XCTAssertTrue(masked.contains("user=****"))
+        XCTAssertTrue(masked.contains("pass=****"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("joe"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("999"))
     }
 }
