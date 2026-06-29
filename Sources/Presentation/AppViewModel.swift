@@ -40,7 +40,9 @@ public final class AppViewModel: ObservableObject {
     
     // Списки для Избранного и Истории
     @Published public private(set) var favoriteIds: Set<String> = []
-    @Published public private(set) var historyIds: [String] = []
+    @Published public private(set) var historyIds: [String] = [] {
+        didSet { historyIdsUpdated() }
+    }
     @Published public var isPlayerDetached: Bool = false
     
     public let repository: any IPTVRepositoryProtocol
@@ -79,23 +81,31 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
-        Publishers.CombineLatest3(
+        // Базовая фильтрация при изменении поиска или вкладки
+        Publishers.CombineLatest(
             $searchQuery
                 .removeDuplicates()
                 .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
             $selectedTab
-                .removeDuplicates(),
-            $favoriteIds
                 .removeDuplicates()
         )
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
-                Task {
-                    await self?.updateFilteredChannels()
-                }
+            .sink { [weak self] _, _ in
+                Task { await self?.updateFilteredChannels() }
             }
             .store(in: &cancellables)
             
+        // Специальный триггер для Избранного: обновляем только если мы на вкладке Избранное
+        $favoriteIds
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                if self?.selectedTab == .favorites {
+                    Task { await self?.updateFilteredChannels() }
+                }
+            }
+            .store(in: &cancellables)
+
         playerManager.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -147,6 +157,7 @@ public final class AppViewModel: ObservableObject {
         var categoryFilter: String?
         var countryFilter: String?
         var languageFilter: String?
+        var matchingIds: Set<String>? = nil
         
         switch selectedTab {
         case .all:
@@ -158,24 +169,26 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
+            matchingIds = favoriteIds
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
-            }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
+            matchingIds = Set(historyIds)
         }
         
-        self.filteredChannels = await filterEngine.filter(
+        let results = await filterEngine.filter(
             query: searchQuery,
             category: categoryFilter,
             country: countryFilter,
-            language: languageFilter
+            language: languageFilter,
+            matchingIds: matchingIds
         )
+
+        if case .history = selectedTab {
+            // Для истории сохраняем хронологический порядок отображения
+            let resultMap = results.reduce(into: [String: Channel]()) { $0[$1.id] = $1 }
+            self.filteredChannels = historyIds.compactMap { resultMap[$0] }
+        } else {
+            self.filteredChannels = results
+        }
     }
     
     /// Начать воспроизведение выбранного канала
@@ -248,18 +261,27 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Триггер при обновлении истории
+    private func historyIdsUpdated() {
+        if selectedTab == .history {
+            Task { await updateFilteredChannels() }
+        }
+    }
+
     /// Добавление просмотра канала в историю в памяти и SwiftData
     private func addToHistory(channel: Channel) {
         let channelId = channel.id
         
         // 1. Обновляем в памяти
-        if let index = historyIds.firstIndex(of: channelId) {
-            historyIds.remove(at: index)
+        var currentHistory = historyIds
+        if let index = currentHistory.firstIndex(of: channelId) {
+            currentHistory.remove(at: index)
         }
-        historyIds.insert(channelId, at: 0)
-        if historyIds.count > 50 {
-            historyIds.removeLast()
+        currentHistory.insert(channelId, at: 0)
+        if currentHistory.count > 50 {
+            currentHistory.removeLast()
         }
+        self.historyIds = currentHistory
         
         // 2. Обновляем в SwiftData
         guard let context = modelContext else { return }

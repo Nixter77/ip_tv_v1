@@ -151,4 +151,31 @@ final class ChannelFilterEngineTests: XCTestCase {
         XCTAssertLessThan(filterDuration, 0.080, "Filter duration must be under 80ms in Debug mode")
         XCTAssertFalse(filtered.isEmpty)
     }
+
+    /// Тест: фильтрация по подмножеству ID (matchingIds)
+    func test_filterWithMatchingIds() async {
+        let channels = [
+            makeChannel(id: "ch1", name: "Channel 1", country: "US"),
+            makeChannel(id: "ch2", name: "Channel 2", country: "UK"),
+            makeChannel(id: "ch3", name: "Channel 3", country: "US")
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+
+        await engine.setup(channels: channels, streams: streams)
+
+        // 1. Только matchingIds
+        let filteredIds = await engine.filter(matchingIds: ["ch1", "ch2"])
+        XCTAssertEqual(filteredIds.count, 2)
+        XCTAssertTrue(filteredIds.contains { $0.id == "ch1" })
+        XCTAssertTrue(filteredIds.contains { $0.id == "ch2" })
+
+        // 2. matchingIds + другой фильтр (страна)
+        let filteredCombined = await engine.filter(country: "US", matchingIds: ["ch1", "ch2"])
+        XCTAssertEqual(filteredCombined.count, 1)
+        XCTAssertEqual(filteredCombined.first?.id, "ch1")
+
+        // 3. matchingIds + поиск
+        let filteredSearch = await engine.filter(query: "Channel 3", matchingIds: ["ch1", "ch2"])
+        XCTAssertTrue(filteredSearch.isEmpty)
+    }
 }
