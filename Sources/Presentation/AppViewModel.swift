@@ -26,9 +26,7 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 @MainActor
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
-    @Published public var searchQuery: String = "" {
-        didSet { saveSearchQuery() }
-    }
+    @Published public var searchQuery: String = ""
     @Published public var selectedTab: SidebarTab = .all {
         didSet { saveSelectedTab() }
     }
@@ -54,7 +52,8 @@ public final class AppViewModel: ObservableObject {
     }
     
     private var cancellables = Set<AnyCancellable>()
-    
+    private var filterTask: Task<Void, Never>?
+
     /// Инициализатор AppViewModel
     /// - Parameters:
     ///   - repository: Репозиторий
@@ -79,20 +78,42 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
-        Publishers.CombineLatest3(
+        // Основной пайплайн фильтрации
+        Publishers.CombineLatest(
             $searchQuery
                 .removeDuplicates()
                 .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
             $selectedTab
-                .removeDuplicates(),
-            $favoriteIds
                 .removeDuplicates()
         )
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
+            .sink { [weak self] _, _ in
                 Task {
                     await self?.updateFilteredChannels()
                 }
+            }
+            .store(in: &cancellables)
+
+        // Обновление при изменении избранного (только если мы на вкладке избранного)
+        $favoriteIds
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if self.selectedTab == .favorites {
+                    Task {
+                        await self.updateFilteredChannels()
+                    }
+                }
+            }
+            .store(in: &cancellables)
+
+        // Дебаунс сохранения поиска в UserDefaults
+        $searchQuery
+            .removeDuplicates()
+            .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.saveSearchQuery()
             }
             .store(in: &cancellables)
             
@@ -144,38 +165,52 @@ public final class AppViewModel: ObservableObject {
     
     /// Обновление списка отфильтрованных каналов через FilterEngine
     private func updateFilteredChannels() async {
-        var categoryFilter: String?
-        var countryFilter: String?
-        var languageFilter: String?
+        filterTask?.cancel()
         
-        switch selectedTab {
-        case .all:
-            break
-        case .category(let name):
-            categoryFilter = name
-        case .country(let code):
-            countryFilter = code
-        case .language(let code):
-            languageFilter = code
-        case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
-        case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+        let task = Task {
+            var categoryFilter: String?
+            var countryFilter: String?
+            var languageFilter: String?
+            var matchingIds: Set<String>? = nil
+
+            switch selectedTab {
+            case .all:
+                break
+            case .category(let name):
+                categoryFilter = name
+            case .country(let code):
+                countryFilter = code
+            case .language(let code):
+                languageFilter = code
+            case .favorites:
+                matchingIds = favoriteIds
+            case .history:
+                matchingIds = Set(historyIds)
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
+
+            let result = await filterEngine.filter(
+                query: searchQuery,
+                category: categoryFilter,
+                country: countryFilter,
+                language: languageFilter,
+                matchingIds: matchingIds
+            )
+
+            guard !Task.isCancelled else { return }
+
+            // Сохраняем порядок для Истории
+            if case .history = selectedTab {
+                let channelMap = result.reduce(into: [String: Channel](minimumCapacity: result.count)) { map, channel in
+                    map[channel.id] = channel
+                }
+                self.filteredChannels = historyIds.compactMap { channelMap[$0] }
+            } else {
+                self.filteredChannels = result
+            }
         }
         
-        self.filteredChannels = await filterEngine.filter(
-            query: searchQuery,
-            category: categoryFilter,
-            country: countryFilter,
-            language: languageFilter
-        )
+        filterTask = task
+        await task.value
     }
     
     /// Начать воспроизведение выбранного канала
