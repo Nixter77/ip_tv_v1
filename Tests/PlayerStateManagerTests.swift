@@ -166,6 +166,16 @@ final class PlayerStateManagerTests: XCTestCase {
         
         XCTAssertEqual(manager.avPlayer.currentItem?.preferredPeakBitRate, 1_500_000)
     }
+
+    /// Тест: вычисляемое свойство isActive корректно определяет активные состояния
+    func test_playerStateIsActive() {
+        let stream = makeStream(channel: "test", urlString: "http://test.com")
+
+        XCTAssertFalse(PlayerState.idle.isActive)
+        XCTAssertTrue(PlayerState.loading(stream: stream).isActive)
+        XCTAssertTrue(PlayerState.playing(stream: stream).isActive)
+        XCTAssertFalse(PlayerState.failed(stream: stream, error: "error").isActive)
+    }
 }
 
 #endif
