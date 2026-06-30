@@ -1,5 +1,6 @@
 // Tests/ChannelFilterEngineTests.swift
 import XCTest
+import CoreFoundation
 @testable import IPTVPlayer
 
 final class ChannelFilterEngineTests: XCTestCase {

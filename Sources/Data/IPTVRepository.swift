@@ -1,5 +1,8 @@
 // Sources/Data/IPTVRepository.swift
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Протокол репозитория для загрузки сырых данных из сети
 public protocol IPTVRepositoryProtocol: Sendable {

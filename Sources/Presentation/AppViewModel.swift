@@ -1,3 +1,4 @@
+#if canImport(Combine) && canImport(SwiftData)
 // Sources/Presentation/AppViewModel.swift
 import Foundation
 import SwiftUI
@@ -25,12 +26,8 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 @MainActor
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
-    @Published public var searchQuery: String = "" {
-        didSet { saveSettings() }
-    }
-    @Published public var selectedTab: SidebarTab = .all {
-        didSet { saveSettings() }
-    }
+    @Published public var searchQuery: String = ""
+    @Published public var selectedTab: SidebarTab = .all
     @Published public private(set) var filteredChannels: [Channel] = []
     
     @Published public private(set) var categories: [Category] = []
@@ -42,9 +39,9 @@ public final class AppViewModel: ObservableObject {
     @Published public private(set) var historyIds: [String] = []
     @Published public var isPlayerDetached: Bool = false
     
-    public let repository: IPTVRepositoryProtocol
-    public let filterEngine: ChannelFilterEngineProtocol
-    public let playerManager: PlayerStateManagerProtocol
+    public let repository: any IPTVRepositoryProtocol
+    public let filterEngine: any ChannelFilterEngineProtocol
+    public let playerManager: any PlayerStateManagerProtocol
     
     // SwiftData
     private let modelContainer: ModelContainer?
@@ -61,9 +58,9 @@ public final class AppViewModel: ObservableObject {
     ///   - playerManager: Менеджер воспроизведения
     ///   - modelContainer: SwiftData контейнер (опциональный для гибкости и тестирования)
     public init(
-        repository: IPTVRepositoryProtocol,
-        filterEngine: ChannelFilterEngineProtocol,
-        playerManager: PlayerStateManagerProtocol,
+        repository: any IPTVRepositoryProtocol,
+        filterEngine: any ChannelFilterEngineProtocol,
+        playerManager: any PlayerStateManagerProtocol,
         modelContainer: ModelContainer? = nil
     ) {
         self.repository = repository
@@ -78,9 +75,18 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
-        Publishers.CombineLatest3($searchQuery, $selectedTab, $favoriteIds)
+        Publishers.CombineLatest3(
+            $searchQuery
+                .removeDuplicates()
+                .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
+            $selectedTab
+                .removeDuplicates(),
+            $favoriteIds
+                .removeDuplicates()
+        )
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _, _, _ in
+                self?.saveSettings()
                 Task {
                     await self?.updateFilteredChannels()
                 }
@@ -99,16 +105,20 @@ public final class AppViewModel: ObservableObject {
     public func loadData() async {
         self.loadingState = .loading
         do {
-            let (channels, streams, cats, ctrs, langs) = try await Task.detached(priority: .userInitiated) {
-                async let channelsFetch = self.repository.fetchChannels()
-                async let streamsFetch = self.repository.fetchStreams()
-                async let catsFetch = self.repository.fetchCategories()
-                async let ctrsFetch = self.repository.fetchCountries()
-                async let langsFetch = self.repository.fetchLanguages()
-                
-                return try await (channelsFetch, streamsFetch, catsFetch, ctrsFetch, langsFetch)
-            }.value
-            
+            async let channelsFetch = repository.fetchChannels()
+            async let streamsFetch = repository.fetchStreams()
+            async let catsFetch = repository.fetchCategories()
+            async let ctrsFetch = repository.fetchCountries()
+            async let langsFetch = repository.fetchLanguages()
+
+            let (channels, streams, cats, ctrs, langs) = try await (
+                channelsFetch,
+                streamsFetch,
+                catsFetch,
+                ctrsFetch,
+                langsFetch
+            )
+
             await filterEngine.setup(channels: channels, streams: streams)
             
             self.categories = cats.sorted { $0.name < $1.name }
@@ -119,7 +129,8 @@ public final class AppViewModel: ObservableObject {
             
             self.loadingState = .ready
         } catch {
-            self.loadingState = .error("Ошибка загрузки плейлиста: \(error.localizedDescription)")
+            let errorMsg = Stream.maskURLs(in: error.localizedDescription)
+            self.loadingState = .error("Ошибка загрузки плейлиста: \(errorMsg)")
         }
     }
     
@@ -130,9 +141,9 @@ public final class AppViewModel: ObservableObject {
     
     /// Обновление списка отфильтрованных каналов через FilterEngine
     private func updateFilteredChannels() async {
-        var categoryFilter: String? = nil
-        var countryFilter: String? = nil
-        var languageFilter: String? = nil
+        var categoryFilter: String?
+        var countryFilter: String?
+        var languageFilter: String?
         
         switch selectedTab {
         case .all:
@@ -149,7 +160,9 @@ public final class AppViewModel: ObservableObject {
             return
         case .history:
             let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = Dictionary(uniqueKeysWithValues: allChannels.map { ($0.id, $0) })
+            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
+                map[channel.id] = channel
+            }
             self.filteredChannels = historyIds.compactMap { channelMap[$0] }
             return
         }
@@ -193,18 +206,18 @@ public final class AppViewModel: ObservableObject {
             let items = try context.fetch(descriptor)
             
             // Восстанавливаем Избранное
-            let favorites = items.filter { $0.isFavorite }.map { $0.id }
+            let favorites = items.compactMap { $0.isFavorite ? $0.id : nil }
             self.favoriteIds = Set(favorites)
             
             // Восстанавливаем Историю (сортируем по дате просмотра от свежих к старым)
-            let history = items.filter { $0.lastViewedAt != nil }
+            let history = items.compactMap { $0.lastViewedAt != nil ? $0 : nil }
                 .sorted { ($0.lastViewedAt ?? Date.distantPast) > ($1.lastViewedAt ?? Date.distantPast) }
                 .map { $0.id }
             
             // Ограничиваем историю 50 элементами по ТЗ
             self.historyIds = Array(history.prefix(50))
         } catch {
-            print("Не удалось прочитать данные из SwiftData: \(error)")
+            print("Не удалось прочитать данные из SwiftData: \(Stream.maskURLs(in: error.localizedDescription))")
         }
     }
 
@@ -228,7 +241,7 @@ public final class AppViewModel: ObservableObject {
             }
             try context.save()
         } catch {
-            print("Ошибка при записи избранного в SwiftData: \(error)")
+            print("Ошибка при записи избранного в SwiftData: \(Stream.maskURLs(in: error.localizedDescription))")
         }
     }
 
@@ -260,18 +273,28 @@ public final class AppViewModel: ObservableObject {
             }
             try context.save()
         } catch {
-            print("Ошибка при записи истории в SwiftData: \(error)")
+            print("Ошибка при записи истории в SwiftData: \(Stream.maskURLs(in: error.localizedDescription))")
         }
     }
     
     // MARK: - UserDefaults Логика настроек сессии
 
-    /// Сохранение выбранных фильтров в UserDefaults
-    private func saveSettings() {
+    /// Сохранение поискового запроса в UserDefaults (быстрая операция со строкой)
+    private func saveSearchQuery() {
+        UserDefaults.standard.set(searchQuery, forKey: "lastSearchQuery")
+    }
+
+    /// Сохранение выбранной вкладки в UserDefaults (операция с JSON кодированием)
+    private func saveSelectedTab() {
         if let encoded = try? JSONEncoder().encode(selectedTab) {
             UserDefaults.standard.set(encoded, forKey: "lastSelectedTab")
         }
-        UserDefaults.standard.set(searchQuery, forKey: "lastSearchQuery")
+    }
+
+    /// Сохранение всех настроек (для обратной совместимости или пакетного обновления)
+    private func saveSettings() {
+        saveSearchQuery()
+        saveSelectedTab()
     }
     
     /// Восстановление фильтров из UserDefaults при старте
@@ -285,3 +308,5 @@ public final class AppViewModel: ObservableObject {
         }
     }
 }
+
+#endif

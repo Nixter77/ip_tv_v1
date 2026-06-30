@@ -1,3 +1,4 @@
+#if canImport(SwiftUI) && canImport(AVFoundation)
 // Sources/Presentation/MainSplitView.swift
 import SwiftUI
 import AVFoundation
@@ -143,6 +144,7 @@ public struct MainSplitView: View {
             }
         }
         .listStyle(SidebarListStyle())
+        .padding(.top, 40) // Отступ сверху для компенсации скрытого TitleBar macOS drag-зоны!
         .safeAreaInset(edge: .bottom) {
             // Кнопка перезагрузки внизу сайдбара
             HStack {
@@ -157,7 +159,7 @@ public struct MainSplitView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
-                .help("⌘R")
+                .help("Обновить плейлист (⌘R)")
                 
                 Spacer()
             }
@@ -182,6 +184,8 @@ public struct MainSplitView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .help("Очистить поиск")
+                    .accessibilityLabel("Очистить поиск")
                 }
             }
             .padding(8)
@@ -205,12 +209,61 @@ public struct MainSplitView: View {
                         .multilineTextAlignment(.center)
                         .foregroundColor(.secondary)
                         .padding(.horizontal)
+
+                    Button("Попробовать снова") {
+                        Task {
+                            await viewModel.reloadPlaylist()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 8)
                 }
                 Spacer()
             } else if viewModel.filteredChannels.isEmpty {
                 Spacer()
-                Text("Каналы не найдены")
-                    .foregroundColor(.secondary)
+                VStack(spacing: 16) {
+                    if viewModel.selectedTab == .favorites {
+                        Image(systemName: "heart")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("В избранном пусто")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                        Button("Перейти ко всем каналам") {
+                            viewModel.selectedTab = .all
+                        }
+                        .buttonStyle(.bordered)
+                    } else if viewModel.selectedTab == .history {
+                        Image(systemName: "clock")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("История пуста")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                        Button("Перейти ко всем каналам") {
+                            viewModel.selectedTab = .all
+                        }
+                        .buttonStyle(.bordered)
+                    } else if !viewModel.searchQuery.isEmpty {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("Ничего не найдено")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                        Button("Очистить поиск") {
+                            viewModel.searchQuery = ""
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Image(systemName: "tv")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("Каналы не найдены")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                    }
+                }
                 Spacer()
             } else {
                 List(viewModel.filteredChannels, id: \.id, selection: $selectedChannel) { channel in
@@ -235,121 +288,50 @@ public struct MainSplitView: View {
         }
     }
     
-    // MARK: - 3. Player Detail View
+    // MARK: - 3. Player Detail View (QuickTime стиль)
     private var playerDetailView: some View {
         ZStack {
-            Color(NSColor.windowBackgroundColor)
-            
+            Color.black
+
             if let channel = viewModel.playerManager.currentChannel {
-                VStack(spacing: 0) {
-                    // Видео-плеер
-                    if viewModel.isPlayerDetached {
-                        ZStack {
-                            Color.black.ignoresSafeArea()
-                            VStack(spacing: 16) {
-                                Image(systemName: "tv.and.mediabox")
-                                    .font(.system(size: 64))
-                                    .foregroundColor(.secondary)
-                                Text("Трансляция перенесена в отдельное окно")
-                                    .font(.title3)
-                                    .foregroundColor(.white)
-                                Button("Вернуть в главное окно") {
-                                    viewModel.isPlayerDetached = false
-                                    dismissWindow(id: "detached-player")
-                                }
-                                .buttonStyle(.borderedProminent)
-                            }
+                if viewModel.isPlayerDetached {
+                    VStack(spacing: 16) {
+                        Image(systemName: "tv.and.mediabox")
+                            .font(.system(size: 64))
+                            .foregroundColor(.secondary)
+                        Text("Трансляция перенесена в отдельное окно")
+                            .font(.title3)
+                            .foregroundColor(.white)
+                        Button("Вернуть в главное окно") {
+                            viewModel.isPlayerDetached = false
+                            dismissWindow(id: "detached-player")
                         }
-                    } else {
-                        ZStack {
-                            VideoPlayerView(player: viewModel.playerManager.avPlayer)
-                                .ignoresSafeArea()
-                            
-                            // Кастомный HUD оверлей при загрузке или ошибке
-                            hudOverlay
-                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    
-                    // Панель информации о канале
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(channel.name)
-                                .font(.title2)
-                                .fontWeight(.bold)
-                            
-                            HStack(spacing: 12) {
-                                if let country = channel.country {
-                                    Text("🌐 Страна: \(country)")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                                if !channel.categories.isEmpty {
-                                    Text("🏷️ \(channel.categories.joined(separator: ", "))")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        
-                        Spacer()
-                        
-                        // Регулятор битрейта (выбор качества)
-                        Picker("Качество", selection: Binding(
-                            get: { viewModel.playerManager.preferredBitrate },
-                            set: { viewModel.playerManager.preferredBitrate = $0 }
-                        )) {
-                            Text("Авто").tag(Double(0))
-                            Text("1080p (6 Mbps)").tag(Double(6_000_000))
-                            Text("720p (3 Mbps)").tag(Double(3_000_000))
-                            Text("480p (1.5 Mbps)").tag(Double(1_500_000))
-                            Text("360p (800 Kbps)").tag(Double(800_000))
-                            Text("240p (400 Kbps)").tag(Double(400_000))
-                        }
-                        .pickerStyle(.menu)
-                        .frame(width: 140)
-                        .padding(.trailing, 8)
-                        
-                        // Кнопка отсоединения плеера в отдельное окно
-                        if !viewModel.isPlayerDetached {
-                            Button(action: {
-                                viewModel.isPlayerDetached = true
-                                openWindow(id: "detached-player")
-                            }) {
-                                Image(systemName: "rectangle.portrait.and.arrow.right")
-                                    .font(.title2)
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 8)
-                            .help("Смотреть в отдельном окне")
-                        }
-                        
-                        // Кнопка переключения полноэкранного режима
-                        Button(action: {
+                } else {
+                    QuickTimeVideoContainer(
+                        player: viewModel.playerManager.avPlayer,
+                        playerState: viewModel.playerManager.state,
+                        channelName: viewModel.playerManager.currentChannel?.name,
+                        isFavorite: viewModel.favoriteIds.contains(channel.id),
+                        onToggleFullscreen: {
                             if let window = NSApp.keyWindow {
                                 window.toggleFullScreen(nil)
                             }
-                        }) {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.title2)
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 8)
-                        .help("Во весь экран")
-                        
-                        Button(action: {
+                        },
+                        onDetachPlayer: {
+                            viewModel.isPlayerDetached = true
+                            openWindow(id: "detached-player")
+                        },
+                        onToggleFavorite: {
                             viewModel.toggleFavorite(channelId: channel.id)
-                        }) {
-                            Image(systemName: viewModel.favoriteIds.contains(channel.id) ? "heart.fill" : "heart")
-                                .font(.title2)
-                                .foregroundColor(viewModel.favoriteIds.contains(channel.id) ? .pink : .secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .padding()
-                    }
-                    .padding()
-                    .background(VisualEffectView(material: .headerView, blendingMode: .withinWindow))
+                        },
+                        preferredBitrate: Binding(
+                            get: { viewModel.playerManager.preferredBitrate },
+                            set: { viewModel.playerManager.preferredBitrate = $0 }
+                        )
+                    )
+                    .ignoresSafeArea()
                 }
             } else {
                 VStack(spacing: 16) {
@@ -359,55 +341,6 @@ public struct MainSplitView: View {
                     Text("Выберите телеканал для трансляции")
                         .font(.title3)
                         .foregroundColor(.secondary)
-                }
-            }
-        }
-    }
-    
-    // MARK: - HUD Оверлей поверх плеера
-    private var hudOverlay: some View {
-        Group {
-            switch viewModel.playerManager.state {
-            case .idle:
-                EmptyView()
-            case .loading(let stream):
-                ZStack {
-                    Color.black.opacity(0.6)
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        Text("Буферизация трансляции...")
-                            .foregroundColor(.white)
-                            .font(.headline)
-                        Text(stream.urlString)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .padding(.horizontal)
-                    }
-                }
-            case .playing:
-                EmptyView()
-            case .failed(let stream, let error):
-                ZStack {
-                    Color.black.opacity(0.8)
-                    VStack(spacing: 16) {
-                        Image(systemName: "xmark.octagon.fill")
-                            .font(.system(size: 48))
-                            .foregroundColor(.red)
-                        Text("Ошибка воспроизведения")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        Text(error)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                        Text(stream.urlString)
-                            .font(.caption2)
-                            .foregroundColor(.gray)
-                            .lineLimit(1)
-                            .padding(.horizontal)
-                    }
                 }
             }
         }
@@ -442,6 +375,7 @@ struct ChannelRowView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 44, height: 44)
                         .cornerRadius(6)
+                        .accessibilityLabel("Логотип канала \(channel.name)")
                 default:
                     // Красивый градиентный плейсхолдер с первой буквой канала
                     ZStack {
@@ -457,6 +391,7 @@ struct ChannelRowView: View {
                     }
                     .frame(width: 44, height: 44)
                     .cornerRadius(6)
+                    .accessibilityLabel("Логотип \(channel.name) отсутствует")
                 }
             }
             
@@ -485,14 +420,14 @@ struct ChannelRowView: View {
             Spacer()
             
             // Кнопка избранного, появляется при hover или если уже в избранном
-            if isHovered || isFavorite {
-                Button(action: onFavoriteToggle) {
-                    Image(systemName: isFavorite ? "heart.fill" : "heart")
-                        .foregroundColor(isFavorite ? .pink : .secondary)
-                }
-                .buttonStyle(.plain)
-                .transition(.opacity)
+            Button(action: onFavoriteToggle) {
+                Image(systemName: isFavorite ? "heart.fill" : "heart")
+                    .foregroundColor(isFavorite ? .pink : .secondary)
             }
+            .buttonStyle(.plain)
+            .opacity(isHovered || isFavorite ? 1 : 0)
+            .help(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
+            .accessibilityLabel(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
@@ -503,6 +438,19 @@ struct ChannelRowView: View {
             }
         }
         .scaleEffect(isHovered ? 1.01 : 1.0)
+        .contextMenu {
+            Button(action: onFavoriteToggle) {
+                Label(isFavorite ? "Удалить из избранного" : "Добавить в избранное",
+                      systemImage: isFavorite ? "heart.slash" : "heart")
+            }
+
+            Button(action: {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(channel.name, forType: .string)
+            }) {
+                Label("Копировать название", systemImage: "doc.on.doc")
+            }
+        }
     }
 }
 
@@ -524,3 +472,5 @@ struct VisualEffectView: NSViewRepresentable {
         nsView.blendingMode = blendingMode
     }
 }
+
+#endif

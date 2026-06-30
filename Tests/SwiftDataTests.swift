@@ -1,3 +1,4 @@
+#if canImport(SwiftData)
 // Tests/SwiftDataTests.swift
 import XCTest
 import SwiftData
@@ -64,3 +65,5 @@ final class SwiftDataTests: XCTestCase {
         XCTAssertTrue(itemsAfterDelete.isEmpty, "Объект должен быть успешно удален из базы")
     }
 }
+
+#endif

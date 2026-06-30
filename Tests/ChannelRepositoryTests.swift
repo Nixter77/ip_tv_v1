@@ -1,5 +1,9 @@
 // Tests/ChannelRepositoryTests.swift
 import XCTest
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import IPTVPlayer
 
 final class URLProtocolMock: URLProtocol {
@@ -116,6 +120,66 @@ final class ChannelRepositoryTests: XCTestCase {
         XCTAssertNil(channels.first?.website)
     }
 
+    /// Проверяет успешное декодирование стран при корректном JSON
+    func test_validCountryDecoding() async throws {
+        let jsonString = """
+        [
+            {
+                "code": "us",
+                "name": "United States",
+                "languages": ["eng", "spa"],
+                "flag": "🇺🇸"
+            }
+        ]
+        """
+        let data = Data(jsonString.utf8)
+        let url = URL(string: "https://iptv-org.github.io/api/countries.json")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+        URLProtocolMock.mockData[url] = (data, response, nil)
+
+        let countries = try await repository.fetchCountries()
+
+        XCTAssertEqual(countries.count, 1)
+        guard !countries.isEmpty else {
+            XCTFail("Countries array is empty")
+            return
+        }
+        XCTAssertEqual(countries.first?.code, "us")
+        XCTAssertEqual(countries.first?.name, "United States")
+        XCTAssertEqual(countries.first?.languages, ["eng", "spa"])
+        XCTAssertEqual(countries.first?.flag, "🇺🇸")
+    }
+
+    /// Проверяет успешное декодирование страны при отсутствии необязательных полей
+    func test_missingOptionalFieldsCountryDecoding() async throws {
+        let jsonString = """
+        [
+            {
+                "code": "us",
+                "name": "United States"
+            }
+        ]
+        """
+        let data = Data(jsonString.utf8)
+        let url = URL(string: "https://iptv-org.github.io/api/countries.json")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+        URLProtocolMock.mockData[url] = (data, response, nil)
+
+        let countries = try await repository.fetchCountries()
+
+        XCTAssertEqual(countries.count, 1)
+        guard !countries.isEmpty else {
+            XCTFail("Countries array is empty")
+            return
+        }
+        XCTAssertEqual(countries.first?.code, "us")
+        XCTAssertEqual(countries.first?.name, "United States")
+        XCTAssertEqual(countries.first?.languages, [])
+        XCTAssertNil(countries.first?.flag)
+    }
+
     /// Проверяет, что один поврежденный элемент в массиве стримов не ломает декодирование остальных валидных стримов
     func test_corruptedStreamArrayDecoding() async throws {
         let jsonString = """
@@ -154,5 +218,75 @@ final class ChannelRepositoryTests: XCTestCase {
         XCTAssertEqual(streams[0].urlString, "http://cnn-live.com/stream.m3u8")
         XCTAssertEqual(streams[1].channel, "fox.us")
         XCTAssertEqual(streams[1].urlString, "http://fox-live.com/stream.m3u8")
+    }
+
+    /// Проверяет успешное декодирование языков при корректном JSON
+    func test_validLanguageDecoding() async throws {
+        let jsonString = """
+        [
+            {
+                "code": "eng",
+                "name": "English"
+            },
+            {
+                "code": "rus",
+                "name": "Russian"
+            }
+        ]
+        """
+        let data = Data(jsonString.utf8)
+        let url = URL(string: "https://iptv-org.github.io/api/languages.json")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+        URLProtocolMock.mockData[url] = (data, response, nil)
+
+        let languages = try await repository.fetchLanguages()
+
+        XCTAssertEqual(languages.count, 2)
+        guard languages.count >= 2 else {
+            XCTFail("Languages array count is less than 2")
+            return
+        }
+        XCTAssertEqual(languages[0].code, "eng")
+        XCTAssertEqual(languages[0].name, "English")
+        XCTAssertEqual(languages[1].code, "rus")
+        XCTAssertEqual(languages[1].name, "Russian")
+    }
+
+    /// Проверяет, что один поврежденный элемент в массиве языков не ломает декодирование остальных
+    func test_corruptedLanguageArrayDecoding() async throws {
+        let jsonString = """
+        [
+            {
+                "code": "eng",
+                "name": "English"
+            },
+            {
+                "code": 123,
+                "name": "Invalid Code Type"
+            },
+            {
+                "code": "zho",
+                "name": "Chinese"
+            }
+        ]
+        """
+        let data = Data(jsonString.utf8)
+        let url = URL(string: "https://iptv-org.github.io/api/languages.json")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+        URLProtocolMock.mockData[url] = (data, response, nil)
+
+        let languages = try await repository.fetchLanguages()
+
+        XCTAssertEqual(languages.count, 2)
+        guard languages.count >= 2 else {
+            XCTFail("Languages array count is less than 2: \\(languages.count)")
+            return
+        }
+        XCTAssertEqual(languages[0].code, "eng")
+        XCTAssertEqual(languages[0].name, "English")
+        XCTAssertEqual(languages[1].code, "zho")
+        XCTAssertEqual(languages[1].name, "Chinese")
     }
 }

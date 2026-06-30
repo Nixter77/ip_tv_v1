@@ -4,7 +4,7 @@ import Foundation
 /// Расширение для быстрого свертывания диакритических знаков и приведения к нижнему регистру
 private extension String {
     func foldedForSearch() -> String {
-        return self.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        return self.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
     }
 }
 
@@ -28,6 +28,9 @@ public protocol ChannelFilterEngineProtocol: Sendable {
 /// Высокопроизводительная реализация ChannelFilterEngine в виде Swift Actor.
 /// Использует инвертированные индексы на основе словарей, множеств и двоичного поиска для мгновенного выполнения запросов.
 public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
+    /// Кэшированный набор символов для токенизации (избегаем повторных аллокаций CharacterSet.alphanumerics.inverted)
+    private static let nonAlphanumerics = CharacterSet.alphanumerics.inverted
+
     // Первичные данные
     private var channels: [String: Channel] = [:]
     private var activeStreams: [String: [Stream]] = [:] // key: channelId
@@ -43,6 +46,12 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     // Отсортированный массив токенов для сверхбыстрого двоичного поиска по префиксу
     private var sortedTokens: [String] = []
     
+    // Кэшированные наборы ID каналов, соответствующие sortedTokens (1:1), для исключения lookup-ов в словаре
+    private var tokenSets: [Set<String>] = []
+
+    // Предварительно отсортированный список всех активных каналов (для мгновенного возврата при отсутствии фильтров)
+    private var allChannelsSorted: [Channel] = []
+
     public init() {}
 
     /// Инициализация движка набором каналов и потоков и построение индексов в памяти
@@ -57,6 +66,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         self.channelsByLanguage.removeAll(keepingCapacity: true)
         self.channelIdsByNameToken.removeAll(keepingCapacity: true)
         self.sortedTokens.removeAll(keepingCapacity: true)
+        self.tokenSets.removeAll(keepingCapacity: true)
 
         // 1. Фильтруем и индексируем рабочие потоки (исключаем status == "error")
         for stream in streams {
@@ -65,6 +75,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         }
 
         // 2. Индексируем каналы
+        let nonAlphanumerics = Self.nonAlphanumerics
         for channel in channels {
             // Оставляем только те каналы, у которых есть хотя бы один рабочий поток
             guard self.activeStreams[channel.id] != nil else { continue }
@@ -88,7 +99,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             
             // Токенизация названия для поиска (диакритика вырезается)
             let tokens = channel.name.foldedForSearch()
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .components(separatedBy: nonAlphanumerics)
                 .filter { !$0.isEmpty }
             for token in tokens {
                 self.channelIdsByNameToken[token, default: []].insert(channel.id)
@@ -97,11 +108,17 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         
         // Сортируем токены один раз при старте для обеспечения O(log N) поиска
         self.sortedTokens = channelIdsByNameToken.keys.sorted()
+
+        // Кэшируем соответствующие наборы ID в массив для мгновенного доступа по индексу (O(1))
+        self.tokenSets = sortedTokens.map { channelIdsByNameToken[$0]! }
+
+        // Кэшируем отсортированный список всех каналов
+        self.allChannelsSorted = self.channels.values.sorted { $0.name < $1.name }
     }
 
     /// Вспомогательный метод для двоичного поиска токенов с заданным префиксом.
     /// Работает за O(log K) вместо O(K) линейного поиска.
-    private func findTokens(startingWith prefix: String) -> [String] {
+    private func findTokenRange(startingWith prefix: String) -> Range<Int>? {
         var low = 0
         var high = sortedTokens.count
         
@@ -114,18 +131,23 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             }
         }
         
-        var results: [String] = []
-        var index = low
-        while index < sortedTokens.count {
-            let token = sortedTokens[index]
-            if token.hasPrefix(prefix) {
-                results.append(token)
-                index += 1
+        let start = low
+        guard start < sortedTokens.count, sortedTokens[start].hasPrefix(prefix) else {
+            return nil
+        }
+
+        low = start
+        high = sortedTokens.count
+        while low < high {
+            let mid = (low + high) / 2
+            if sortedTokens[mid].hasPrefix(prefix) {
+                low = mid + 1
             } else {
-                break
+                high = mid
             }
         }
-        return results
+
+        return start..<low
     }
 
     /// Фильтрация с использованием предвычисленных индексов (< 50мс)
@@ -141,66 +163,88 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         country: String?,
         language: String?
     ) async -> [Channel] {
-        var resultSet: Set<String>? = nil
-        
-        let intersect: (Set<String>) -> Void = { set in
-            if let current = resultSet {
-                resultSet = current.intersection(set)
-            } else {
-                resultSet = set
-            }
+        // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
+        let hasFilters = !(query ?? "").isEmpty ||
+                         !(category ?? "").isEmpty ||
+                         !(country ?? "").isEmpty ||
+                         !(language ?? "").isEmpty
+
+        if !hasFilters {
+            return allChannelsSorted
         }
+
+        var resultSet: Set<String>? = nil
         
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
-            let catSet = channelsByCategory[category.lowercased()] ?? []
-            intersect(catSet)
+            resultSet = channelsByCategory[category.lowercased()] ?? []
             if resultSet?.isEmpty == true { return [] }
         }
         
         // 2. Фильтр по стране
         if let country = country, !country.isEmpty {
             let countrySet = channelsByCountry[country.uppercased()] ?? []
-            intersect(countrySet)
+            if var current = resultSet {
+                current.formIntersection(countrySet)
+                resultSet = current
+            } else {
+                resultSet = countrySet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
         // 3. Фильтр по языку
         if let language = language, !language.isEmpty {
             let langSet = channelsByLanguage[language.lowercased()] ?? []
-            intersect(langSet)
+            if var current = resultSet {
+                current.formIntersection(langSet)
+                resultSet = current
+            } else {
+                resultSet = langSet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
         // 4. Текстовый поиск по токенам и префиксам с двоичным поиском
         if let query = query, !query.isEmpty {
             let queryTokens = query.foldedForSearch()
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .components(separatedBy: Self.nonAlphanumerics)
                 .filter { !$0.isEmpty }
             
             var tokenIntersection: Set<String>? = nil
             for token in queryTokens {
-                var tokenSet = Set<String>()
+                var matchesForToken = Set<String>()
                 
                 // Используем сверхбыстрый двоичный поиск для префиксов
-                let matchingTokens = findTokens(startingWith: token)
-                var unionIds: [String] = []
-                for matchingToken in matchingTokens {
-                    if let ids = channelIdsByNameToken[matchingToken] {
-                        unionIds.append(contentsOf: ids)
+                if let range = findTokenRange(startingWith: token) {
+                    for index in range {
+                        // Оптимизация: используем прямой доступ к кэшированным наборам ID по индексу (O(1))
+                        // Это быстрее, чем lookup в словаре channelIdsByNameToken[sortedTokens[index]]
+                        let ids = tokenSets[index]
+                        matchesForToken.formUnion(ids)
                     }
                 }
-                tokenSet = Set(unionIds)
+
+                // Ранний выход, если по текущему токену ничего не найдено
+                if matchesForToken.isEmpty { return [] }
                 
-                if let current = tokenIntersection {
-                    tokenIntersection = current.intersection(tokenSet)
+                if var current = tokenIntersection {
+                    current.formIntersection(matchesForToken)
+                    tokenIntersection = current
+                    // Ранний выход, если пересечение стало пустым
+                    if tokenIntersection?.isEmpty == true { return [] }
                 } else {
-                    tokenIntersection = tokenSet
+                    tokenIntersection = matchesForToken
                 }
             }
             
             if let searchSet = tokenIntersection {
-                intersect(searchSet)
+                if var current = resultSet {
+                    current.formIntersection(searchSet)
+                    resultSet = current
+                } else {
+                    resultSet = searchSet
+                }
             } else {
                 return []
             }
@@ -208,10 +252,13 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         }
         
         // Если никакие фильтры не применялись
-        let finalIds = resultSet ?? Set(channels.keys)
+        guard let finalIds = resultSet else {
+            return allChannelsSorted
+        }
         
-        return finalIds.compactMap { channels[$0] }
-            .sorted { $0.name < $1.name }
+        // Оптимизация: вместо compactMap + sorted (O(M log M)),
+        // фильтруем уже отсортированный массив всех каналов за O(N).
+        return allChannelsSorted.filter { finalIds.contains($0.id) }
     }
 
     /// Получить все доступные потоки для конкретного канала

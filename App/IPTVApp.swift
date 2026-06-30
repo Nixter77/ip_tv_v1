@@ -1,3 +1,4 @@
+#if canImport(SwiftUI) && canImport(SwiftData)
 // App/IPTVApp.swift
 import SwiftUI
 import SwiftData
@@ -40,6 +41,9 @@ struct IPTVApp: App {
             MainSplitView(viewModel: viewModel)
                 .frame(minWidth: 900, minHeight: 600)
                 .navigationTitle("IPTV Player Pro")
+                .background(WindowAccessor { window in
+                    window.isMovableByWindowBackground = false
+                })
         }
         .windowStyle(.hiddenTitleBar) // Скрываем верхнюю плашку для максимального погружения
         
@@ -48,3 +52,5 @@ struct IPTVApp: App {
         }
     }
 }
+
+#endif

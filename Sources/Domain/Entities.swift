@@ -51,11 +51,105 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
     public let timeshift: Int?
     public let httpReferrer: String?
 
+    /// Allowed characters for IPTV URL robust parsing (including # fragment which is NOT in urlQueryAllowed)
+    private static let iptvUrlAllowed: CharacterSet = {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.insert("#")
+        return allowed
+    }()
+
     public var url: URL? {
-        if let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            return URL(string: encoded)
+        // Try standard parsing first.
+        if let url = URL(string: urlString),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            return url
         }
-        return URL(string: urlString)
+
+        // Robust parsing fallback: IPTV stream URLs often contain unencoded spaces.
+        // We encode spaces but MUST preserve query/fragment structure (# and ?) before initializing URL.
+        guard let encodedString = urlString.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed),
+              let url = URL(string: encodedString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+
+        return url
+    }
+
+    /// URL string with masked sensitive information (credentials, query parameters, fragments) for UI display
+    public var maskedUrlString: String {
+        Self.mask(urlString)
+    }
+
+    /// Masks sensitive information in a single URL string
+    public static func mask(_ urlString: String) -> String {
+        // Attempt parsing. If it fails (e.g. due to spaces), try encoding it first (preserving #).
+        var components = URLComponents(string: urlString)
+        if components == nil, let encoded = urlString.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed) {
+            components = URLComponents(string: encoded)
+        }
+
+        guard var components = components, components.scheme != nil else {
+            // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
+            // for common credential patterns to avoid returning a raw URL that might contain tokens.
+            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+        }
+
+        // Mask user credentials
+        if components.user != nil || components.password != nil {
+            components.user = "****"
+            if components.password != nil {
+                components.password = "****"
+            }
+        }
+
+        // Mask query parameter values to protect session tokens/keys
+        if let queryItems = components.queryItems {
+            components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
+        }
+
+        // Some providers put token-like key=value data in path segments instead of a query string.
+        if components.queryItems == nil, components.path.contains("=") {
+            components.path = components.path
+                .split(separator: "/", omittingEmptySubsequences: false)
+                .map { segment in
+                    guard let equalsIndex = segment.firstIndex(of: "=") else {
+                        return String(segment)
+                    }
+                    return String(segment[...equalsIndex]) + "****"
+                }
+                .joined(separator: "/")
+        }
+
+        // Mask fragments (anchors) as they often carry sensitive routing or session info
+        if components.fragment != nil {
+            components.fragment = "****"
+        }
+
+        return components.string ?? urlString
+    }
+
+    /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
+    public static func maskURLs(in text: String) -> String {
+        let pattern = #"https?://[^\s]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return text
+        }
+
+        var result = text
+        let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let matches = regex.matches(in: text, range: fullRange)
+
+        // Iterate backwards to avoid invalidating later ranges as replacements change string length.
+        for match in matches.reversed() {
+            guard let matchRange = Range(match.range, in: result) else { continue }
+            let urlString = String(result[matchRange])
+            result.replaceSubrange(matchRange, with: mask(urlString))
+        }
+
+        return result
     }
 
     enum CodingKeys: String, CodingKey {
