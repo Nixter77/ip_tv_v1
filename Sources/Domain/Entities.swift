@@ -58,6 +58,18 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         return allowed
     }()
 
+    /// Regex for detecting URLs in text with better boundary handling for trailing punctuation
+    private static let urlDetectionRegex: NSRegularExpression? = {
+        let pattern = #"https?://[^\s,;()<>[\]{}'"]+"#
+        return try? NSRegularExpression(pattern: pattern)
+    }()
+
+    /// Regex for redacting sensitive values while preserving parameter keys, supporting various delimiters
+    private static let paramRegex: NSRegularExpression? = {
+        let pattern = #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;\s#]+"#
+        return try? NSRegularExpression(pattern: pattern)
+    }()
+
     public var url: URL? {
         // Try standard parsing first.
         if let url = URL(string: urlString),
@@ -128,13 +140,21 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             components.fragment = "****"
         }
 
-        return components.string ?? urlString
+        var result = components.string ?? urlString
+
+        // Defense in depth: Use regex to mask any remaining key=value pairs that URLComponents missed
+        // (e.g. in path segments or using non-standard delimiters like | or ;)
+        if let regex = paramRegex {
+            let range = NSRange(result.startIndex..<result.endIndex, in: result)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=****")
+        }
+
+        return result
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
     public static func maskURLs(in text: String) -> String {
-        let pattern = #"https?://[^\s]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+        guard let regex = urlDetectionRegex else {
             return text
         }
 

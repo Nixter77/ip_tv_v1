@@ -100,4 +100,36 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_handlesNonStandardDelimiters() {
+        // Some streams use | or ; as delimiters instead of ? and &
+        let urlWithDelimiters = "http://example.com/play|token=secret123;key=abc"
+        let masked = Stream.mask(urlWithDelimiters)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("key=****"))
+        XCTAssertFalse(masked.contains("secret123"))
+        XCTAssertFalse(masked.contains("abc"))
+    }
+
+    func test_maskURLs_respectsTextBoundaries() {
+        let text = "Error at https://example.com/play?token=123, check logs."
+        let masked = Stream.maskURLs(in: text)
+
+        // The comma and period should NOT be part of the masked URL
+        XCTAssertTrue(masked.contains("https://example.com/play?token=****"))
+        XCTAssertTrue(masked.contains("****, check logs."))
+        XCTAssertFalse(masked.contains("123"))
+    }
+
+    func test_mask_masksPathAndQueryTogether() {
+        // Test case where both path parameters and query parameters exist
+        let complexUrl = "https://host.com/auth=pass/stream.m3u8?token=123"
+        let masked = Stream.mask(complexUrl)
+
+        XCTAssertTrue(masked.contains("auth=****"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("pass"))
+        XCTAssertFalse(masked.contains("123"))
+    }
 }
