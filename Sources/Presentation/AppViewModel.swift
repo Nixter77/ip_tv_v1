@@ -50,6 +50,7 @@ public final class AppViewModel: ObservableObject {
     }
     
     private var cancellables = Set<AnyCancellable>()
+    private var filterTask: Task<Void, Never>?
     
     /// Инициализатор AppViewModel
     /// - Parameters:
@@ -141,38 +142,57 @@ public final class AppViewModel: ObservableObject {
     
     /// Обновление списка отфильтрованных каналов через FilterEngine
     private func updateFilteredChannels() async {
-        var categoryFilter: String?
-        var countryFilter: String?
-        var languageFilter: String?
+        // Отменяем предыдущую задачу, чтобы избежать лишней работы и состояния гонки при быстром вводе
+        filterTask?.cancel()
         
-        switch selectedTab {
-        case .all:
-            break
-        case .category(let name):
-            categoryFilter = name
-        case .country(let code):
-            countryFilter = code
-        case .language(let code):
-            languageFilter = code
-        case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
-        case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+        filterTask = Task {
+            var categoryFilter: String?
+            var countryFilter: String?
+            var languageFilter: String?
+            var matchingIds: Set<String>?
+
+            switch selectedTab {
+            case .all:
+                break
+            case .category(let name):
+                categoryFilter = name
+            case .country(let code):
+                countryFilter = code
+            case .language(let code):
+                languageFilter = code
+            case .favorites:
+                matchingIds = favoriteIds
+            case .history:
+                matchingIds = Set(historyIds)
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
+
+            // Выполняем фильтрацию (теперь с поддержкой подмножеств в FilterEngine)
+            let results = await filterEngine.filter(
+                query: searchQuery,
+                category: categoryFilter,
+                country: countryFilter,
+                language: languageFilter,
+                matchingIds: matchingIds
+            )
+
+            // Если задача была отменена во время await, не обновляем UI
+            if Task.isCancelled { return }
+
+            // Специальная логика для истории: сохраняем порядок просмотра
+            if case .history = selectedTab {
+                // Создаем карту только из результатов фильтрации (subset), что быстрее полной карты
+                let channelMap = results.reduce(into: [String: Channel](minimumCapacity: results.count)) { map, channel in
+                    map[channel.id] = channel
+                }
+                let orderedHistory = historyIds.compactMap { channelMap[$0] }
+                self.filteredChannels = orderedHistory
+            } else {
+                self.filteredChannels = results
+            }
         }
         
-        self.filteredChannels = await filterEngine.filter(
-            query: searchQuery,
-            category: categoryFilter,
-            country: countryFilter,
-            language: languageFilter
-        )
+        // Ожидаем завершения задачи, чтобы гарантировать последовательность при вызове из loadData
+        await filterTask?.value
     }
     
     /// Начать воспроизведение выбранного канала

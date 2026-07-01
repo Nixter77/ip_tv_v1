@@ -15,3 +15,7 @@
 ## 2024-05-31 - [Optimization] Debounced Search and Granular Persistence
 **Learning:** In SwiftUI ViewModels using Combine, chaining multiple state properties into a single pipeline can cause explosive redundant work. Debouncing and duplicate removal are essential for search inputs. Furthermore, coupling simple state persistence (strings) with complex state persistence (JSON) in a single method creates unnecessary encoding overhead.
 **Action:** Always debounce search inputs and use granular persistence methods to avoid expensive encoding for simple property changes.
+
+## 2024-06-01 - [Optimization] Subset Filtering and Task Cancellation
+**Learning:** Moving subset filtering from the Main thread (ViewModel) to the background Actor using a `matchingIds` parameter prevents UI blocking and reduces data transfer overhead. Coupling this with `Task` cancellation ensures that only the latest user action (typing/tab switching) updates the UI, preventing race conditions and stale data rendering.
+**Action:** Extend filter engines to support subset ID sets and implement a `filterTask` cancellation pattern in ViewModels for high-frequency updates.
