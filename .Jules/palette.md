@@ -13,3 +13,7 @@
 ## 2026-05-31 - [Native macOS Interactions and Layout Stability]
 **Learning:** For macOS-native SwiftUI apps, favor `.opacity(isVisible ? 1 : 0)` over conditional rendering for interactive elements in rows to prevent layout jumps during hover and keep elements accessible. Implementing `.contextMenu` for secondary actions like "Copy Name" or "Toggle Favorite" improves desktop-native feel and discoverability.
 **Action:** Use `.opacity` for stable hover buttons and provide context menus for row-based actions.
+
+## 2026-06-01 - [Playback Indicators in High-Density Media Lists]
+**Learning:** In media applications with extensive channel lists, a persistent 'Now Playing' visual (e.g., a blue waveform icon) serves as a critical navigation anchor. It allows users to quickly re-identify the active stream after browsing or filtering, reducing cognitive overhead in state-heavy interfaces.
+**Action:** Implement an `isActive` property on playback states and display a localized, accessible indicator next to the active item in all list views.
