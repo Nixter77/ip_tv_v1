@@ -7,6 +7,7 @@
 - [x] Update `Sources/Presentation/DetachedPlayerView.swift` to use public `WindowAccessor` and disable ignoresSafeArea on video container <!-- id: 9 -->
 - [x] Update `App/IPTVApp.swift` to use the public `WindowAccessor` and remove local declaration <!-- id: 10 -->
 - [x] Verify changes manually and run unit tests <!-- id: 11 -->
+- [x] Optimize Favorites and History filtering using `matchingIds` in `FilterEngine` <!-- id: 12 -->
 
 ## Review
 - **Public Window Accessor**: Moved the local window accessor out of `IPTVApp.swift` to the `Presentation` module to allow shared access across modules.
