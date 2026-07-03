@@ -15,3 +15,7 @@
 ## 2024-05-31 - [Optimization] Debounced Search and Granular Persistence
 **Learning:** In SwiftUI ViewModels using Combine, chaining multiple state properties into a single pipeline can cause explosive redundant work. Debouncing and duplicate removal are essential for search inputs. Furthermore, coupling simple state persistence (strings) with complex state persistence (JSON) in a single method creates unnecessary encoding overhead.
 **Action:** Always debounce search inputs and use granular persistence methods to avoid expensive encoding for simple property changes.
+
+## 2025-05-31 - [Optimization] Actor-based Cancellation and Subset Filtering
+**Learning:** For asynchronous filtering engines, propagating 'Task.isCancelled' into tight loops allows the app to drop stale search results immediately during rapid typing. Furthermore, providing a 'matchingIds' hint to the engine allows it to intersect results early, significantly outperforming main-thread post-processing of full result sets.
+**Action:** Always check 'Task.isCancelled' in heavy index loops and prefer server/engine-side subset filtering over main-thread client-side filtering.
