@@ -100,4 +100,38 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    func test_mask_masksPathAndQueryTogether() {
+        let complexUrl = "https://example.com/segment=secret/play?token=123"
+        let masked = Stream.mask(complexUrl)
+
+        XCTAssertTrue(masked.contains("/segment=****"))
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertFalse(masked.contains("secret"))
+        XCTAssertFalse(masked.contains("123"))
+    }
+
+    func test_mask_handlesNonStandardDelimiters() {
+        let streamWithDelims = "http://host.com/play?token=123|key=abc;session=xyz"
+        let masked = Stream.mask(streamWithDelims)
+
+        XCTAssertTrue(masked.contains("token=****"))
+        XCTAssertTrue(masked.contains("|key=****"))
+        XCTAssertTrue(masked.contains(";session=****"))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("abc"))
+        XCTAssertFalse(masked.contains("xyz"))
+    }
+
+    func test_maskURLs_avoidsTrailingPunctuation() {
+        let errorWithPunctuation = "Check https://example.com/play?token=123, or https://other.com/key=456; or (https://extra.com/id=789)."
+        let masked = Stream.maskURLs(in: errorWithPunctuation)
+
+        XCTAssertTrue(masked.contains("https://example.com/play?token=****,"))
+        XCTAssertTrue(masked.contains("https://other.com/key=****;"))
+        XCTAssertTrue(masked.contains("(https://extra.com/id=****)."))
+        XCTAssertFalse(masked.contains("123"))
+        XCTAssertFalse(masked.contains("456"))
+        XCTAssertFalse(masked.contains("789"))
+    }
 }
