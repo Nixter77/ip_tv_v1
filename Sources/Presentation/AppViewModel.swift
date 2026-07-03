@@ -50,6 +50,7 @@ public final class AppViewModel: ObservableObject {
     }
     
     private var cancellables = Set<AnyCancellable>()
+    private var filterTask: Task<Void, Never>?
     
     /// Инициализатор AppViewModel
     /// - Parameters:
@@ -75,20 +76,33 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
-        Publishers.CombineLatest3(
-            $searchQuery
-                .removeDuplicates()
-                .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
-            $selectedTab
-                .removeDuplicates(),
-            $favoriteIds
-                .removeDuplicates()
-        )
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
-                self?.saveSettings()
-                Task {
-                    await self?.updateFilteredChannels()
+        // Разделяем подписки для предотвращения лишних пересчетов
+
+        // 1. Поиск: дебаунс и сохранение
+        $searchQuery
+            .removeDuplicates()
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.saveSearchQuery()
+                self?.triggerUpdate()
+            }
+            .store(in: &cancellables)
+
+        // 2. Вкладка: немедленное обновление и сохранение
+        $selectedTab
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.saveSelectedTab()
+                self?.triggerUpdate()
+            }
+            .store(in: &cancellables)
+
+        // 3. Избранное: обновление только если мы на вкладке избранного
+        $favoriteIds
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                if case .favorites = self?.selectedTab {
+                    self?.triggerUpdate()
                 }
             }
             .store(in: &cancellables)
@@ -138,12 +152,21 @@ public final class AppViewModel: ObservableObject {
     public func reloadPlaylist() async {
         await loadData()
     }
+
+    /// Запуск асинхронного обновления с отменой предыдущей задачи
+    private func triggerUpdate() {
+        filterTask?.cancel()
+        filterTask = Task {
+            await updateFilteredChannels()
+        }
+    }
     
     /// Обновление списка отфильтрованных каналов через FilterEngine
     private func updateFilteredChannels() async {
         var categoryFilter: String?
         var countryFilter: String?
         var languageFilter: String?
+        var matchingIds: Set<String>?
         
         switch selectedTab {
         case .all:
@@ -155,24 +178,29 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
+            matchingIds = favoriteIds
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
-            }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
+            matchingIds = Set(historyIds)
         }
         
-        self.filteredChannels = await filterEngine.filter(
+        let result = await filterEngine.filter(
             query: searchQuery,
             category: categoryFilter,
             country: countryFilter,
-            language: languageFilter
+            language: languageFilter,
+            matchingIds: matchingIds
         )
+
+        // Предотвращаем обновление UI, если задача была отменена
+        if Task.isCancelled { return }
+
+        // Для вкладки истории восстанавливаем хронологический порядок
+        if case .history = selectedTab {
+            let channelMap = result.reduce(into: [String: Channel]()) { $0[$1.id] = $1 }
+            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
+        } else {
+            self.filteredChannels = result
+        }
     }
     
     /// Начать воспроизведение выбранного канала

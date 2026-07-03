@@ -18,11 +18,24 @@ public protocol ChannelFilterEngineProtocol: Sendable {
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>?
     ) async -> [Channel]
     
     /// Получить все доступные потоки для конкретного канала
     func streams(for channelId: String) async -> [Stream]
+}
+
+public extension ChannelFilterEngineProtocol {
+    /// Совместимость: фильтрация без ограничения по ID
+    func filter(
+        query: String? = nil,
+        category: String? = nil,
+        country: String? = nil,
+        language: String? = nil
+    ) async -> [Channel] {
+        await filter(query: query, category: category, country: country, language: language, matchingIds: nil)
+    }
 }
 
 /// Высокопроизводительная реализация ChannelFilterEngine в виде Swift Actor.
@@ -161,19 +174,21 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>?
     ) async -> [Channel] {
         // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
         let hasFilters = !(query ?? "").isEmpty ||
                          !(category ?? "").isEmpty ||
                          !(country ?? "").isEmpty ||
-                         !(language ?? "").isEmpty
+                         !(language ?? "").isEmpty ||
+                         matchingIds != nil
 
         if !hasFilters {
             return allChannelsSorted
         }
 
-        var resultSet: Set<String>? = nil
+        var resultSet: Set<String>? = matchingIds
         
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
@@ -213,6 +228,9 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             
             var tokenIntersection: Set<String>? = nil
             for token in queryTokens {
+                // Прерываем выполнение, если задача была отменена
+                if Task.isCancelled { return [] }
+
                 var matchesForToken = Set<String>()
                 
                 // Используем сверхбыстрый двоичный поиск для префиксов
@@ -256,9 +274,15 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             return allChannelsSorted
         }
         
-        // Оптимизация: вместо compactMap + sorted (O(M log M)),
-        // фильтруем уже отсортированный массив всех каналов за O(N).
-        return allChannelsSorted.filter { finalIds.contains($0.id) }
+        // Эвристическая оптимизация:
+        // Если результирующий набор небольшой (напр. < 1000), быстрее собрать его напрямую через lookup и отсортировать.
+        // Если набор большой, быстрее отфильтровать мастер-список за O(N).
+        if finalIds.count < 1000 {
+            return finalIds.compactMap { channels[$0] }
+                .sorted { $0.name < $1.name }
+        } else {
+            return allChannelsSorted.filter { finalIds.contains($0.id) }
+        }
     }
 
     /// Получить все доступные потоки для конкретного канала
