@@ -39,6 +39,8 @@ public final class AppViewModel: ObservableObject {
     @Published public private(set) var historyIds: [String] = []
     @Published public var isPlayerDetached: Bool = false
     
+    private var filterTask: Task<Void, Never>?
+
     public let repository: any IPTVRepositoryProtocol
     public let filterEngine: any ChannelFilterEngineProtocol
     public let playerManager: any PlayerStateManagerProtocol
@@ -75,20 +77,31 @@ public final class AppViewModel: ObservableObject {
     
     /// Настройка Combine-биндингов для автоматического обновления фильтрации
     private func setupBindings() {
-        Publishers.CombineLatest3(
+        // 1. Основной поток фильтрации: Поиск и переключение вкладок
+        Publishers.CombineLatest(
             $searchQuery
                 .removeDuplicates()
                 .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main),
             $selectedTab
-                .removeDuplicates(),
-            $favoriteIds
                 .removeDuplicates()
         )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] _, _ in
+            self?.saveSettings()
+            self?.updateFilteredChannels()
+        }
+        .store(in: &cancellables)
+
+        // 2. Дополнительный поток: Обновление фильтрации при изменении Избранного
+        // Вызывается только если мы находимся на вкладке Избранное
+        $favoriteIds
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
-                self?.saveSettings()
-                Task {
-                    await self?.updateFilteredChannels()
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                self.saveSettings()
+                if self.selectedTab == .favorites {
+                    self.updateFilteredChannels()
                 }
             }
             .store(in: &cancellables)
@@ -125,7 +138,11 @@ public final class AppViewModel: ObservableObject {
             self.countries = ctrs.sorted { $0.name < $1.name }
             self.languages = langs.sorted { $0.name < $1.name }
             
-            await updateFilteredChannels()
+            updateFilteredChannels()
+            // Ждем завершения фильтрации перед установкой состояния ready, чтобы избежать мерцания пустого списка
+            if let task = filterTask {
+                _ = await task.result
+            }
             
             self.loadingState = .ready
         } catch {
@@ -140,39 +157,50 @@ public final class AppViewModel: ObservableObject {
     }
     
     /// Обновление списка отфильтрованных каналов через FilterEngine
-    private func updateFilteredChannels() async {
-        var categoryFilter: String?
-        var countryFilter: String?
-        var languageFilter: String?
+    private func updateFilteredChannels() {
+        filterTask?.cancel()
         
-        switch selectedTab {
-        case .all:
-            break
-        case .category(let name):
-            categoryFilter = name
-        case .country(let code):
-            countryFilter = code
-        case .language(let code):
-            languageFilter = code
-        case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
-        case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+        filterTask = Task { @MainActor in
+            var categoryFilter: String?
+            var countryFilter: String?
+            var languageFilter: String?
+            var matchingIds: Set<String>?
+
+            switch selectedTab {
+            case .all:
+                break
+            case .category(let name):
+                categoryFilter = name
+            case .country(let code):
+                countryFilter = code
+            case .language(let code):
+                languageFilter = code
+            case .favorites:
+                matchingIds = favoriteIds
+            case .history:
+                matchingIds = Set(historyIds)
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
+
+            let result = await filterEngine.filter(
+                query: searchQuery,
+                category: categoryFilter,
+                country: countryFilter,
+                language: languageFilter,
+                matchingIds: matchingIds
+            )
+
+            if Task.isCancelled { return }
+
+            // Если мы в истории, нужно восстановить порядок просмотра
+            if selectedTab == .history {
+                let channelMap = result.reduce(into: [String: Channel](minimumCapacity: result.count)) { map, channel in
+                    map[channel.id] = channel
+                }
+                self.filteredChannels = historyIds.compactMap { channelMap[$0] }
+            } else {
+                self.filteredChannels = result
+            }
         }
-        
-        self.filteredChannels = await filterEngine.filter(
-            query: searchQuery,
-            category: categoryFilter,
-            country: countryFilter,
-            language: languageFilter
-        )
     }
     
     /// Начать воспроизведение выбранного канала
