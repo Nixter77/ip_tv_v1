@@ -13,3 +13,11 @@
 ## 2026-05-31 - [Native macOS Interactions and Layout Stability]
 **Learning:** For macOS-native SwiftUI apps, favor `.opacity(isVisible ? 1 : 0)` over conditional rendering for interactive elements in rows to prevent layout jumps during hover and keep elements accessible. Implementing `.contextMenu` for secondary actions like "Copy Name" or "Toggle Favorite" improves desktop-native feel and discoverability.
 **Action:** Use `.opacity` for stable hover buttons and provide context menus for row-based actions.
+
+## 2026-06-01 - [Interactive "Now Playing" Indicators and Playback Recovery]
+**Learning:** Providing real-time visual feedback for the active stream in high-density lists (e.g., using a blue waveform icon) helps users quickly orient themselves. Furthermore, completing "retry" loops by passing action closures through multiple view layers ensures that error states are actionable and not just informative.
+**Action:** Always implement  state indicators in list rows and ensure error HUDs have a functional retry mechanism that re-triggers the underlying action.
+
+## 2026-06-01 - [Interactive "Now Playing" Indicators and Playback Recovery]
+**Learning:** Providing real-time visual feedback for the active stream in high-density lists (e.g., using a blue waveform icon) helps users quickly orient themselves. Furthermore, completing "retry" loops by passing action closures through multiple view layers ensures that error states are actionable and not just informative.
+**Action:** Always implement `isActive` state indicators in list rows and ensure error HUDs have a functional retry mechanism that re-triggers the underlying action.
