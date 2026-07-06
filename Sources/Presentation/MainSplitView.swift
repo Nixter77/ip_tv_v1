@@ -262,6 +262,15 @@ public struct MainSplitView: View {
                         Text("Каналы не найдены")
                             .font(.title3)
                             .foregroundColor(.secondary)
+
+                        if viewModel.selectedTab != .all {
+                            Button("Сбросить фильтры") {
+                                viewModel.selectedTab = .all
+                                viewModel.searchQuery = ""
+                            }
+                            .buttonStyle(.bordered)
+                            .padding(.top, 8)
+                        }
                     }
                 }
                 Spacer()

@@ -13,3 +13,7 @@
 ## 2026-05-31 - [Native macOS Interactions and Layout Stability]
 **Learning:** For macOS-native SwiftUI apps, favor `.opacity(isVisible ? 1 : 0)` over conditional rendering for interactive elements in rows to prevent layout jumps during hover and keep elements accessible. Implementing `.contextMenu` for secondary actions like "Copy Name" or "Toggle Favorite" improves desktop-native feel and discoverability.
 **Action:** Use `.opacity` for stable hover buttons and provide context menus for row-based actions.
+
+## 2026-06-01 - [Compound Escape Hatches in Multi-Filter Interfaces]
+**Learning:** In interfaces with multiple concurrent filters (e.g., search + category), providing a single "Reset Filters" button that clears all active constraints is more effective than individual clear buttons. It prevents the "double-empty state" frustration where a user clears their search query but still sees no results because a sidebar category is still selected.
+**Action:** Implement a unified "Reset Filters" action in empty states that clears both text queries and categorical selections.
