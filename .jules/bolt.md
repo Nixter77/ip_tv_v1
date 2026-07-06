@@ -15,3 +15,11 @@
 ## 2024-05-31 - [Optimization] Debounced Search and Granular Persistence
 **Learning:** In SwiftUI ViewModels using Combine, chaining multiple state properties into a single pipeline can cause explosive redundant work. Debouncing and duplicate removal are essential for search inputs. Furthermore, coupling simple state persistence (strings) with complex state persistence (JSON) in a single method creates unnecessary encoding overhead.
 **Action:** Always debounce search inputs and use granular persistence methods to avoid expensive encoding for simple property changes.
+
+## 2024-06-01 - [Optimization] Adaptive Return Path Heuristic
+**Learning:** For a dataset of 50k items, the optimal strategy for returning sorted results depends on the result set size. For small results (M < 1000), fetching from a dictionary and sorting is faster due to the overhead of iterating over a 50k item array. For larger sets, iterating over the pre-sorted master list remains faster as it avoids the $O(M \log M)$ sort cost.
+**Action:** Implement a heuristic threshold (e.g., 1000 items) to switch between dictionary-lookup + sort and pre-sorted filtering.
+
+## 2024-06-01 - [Optimization] Task Management in ViewModels
+**Learning:** High-frequency UI updates (like typing in a search bar) can trigger multiple concurrent async operations. Without explicit Task cancellation, older results can arrive after newer ones, causing flickering and redundant processing. Storing a reference to the active `Task` and calling `cancel()` before starting a new one is essential for UI stability and performance.
+**Action:** Manage async work with a private `Task` property in ViewModels and use `Task.isCancelled` checks.
