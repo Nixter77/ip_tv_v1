@@ -45,6 +45,9 @@ public final class AppViewModel: ObservableObject {
     
     // SwiftData
     private let modelContainer: ModelContainer?
+
+    // Bolt: Reference to the active filtering task to allow cancellation of stale requests
+    private var filterTask: Task<Void, Never>?
     private var modelContext: ModelContext? {
         modelContainer?.mainContext
     }
@@ -87,7 +90,11 @@ public final class AppViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _, _, _ in
                 self?.saveSettings()
-                Task {
+
+                // Bolt: Cancel previous task to prevent race conditions and redundant work
+                self?.filterTask?.cancel()
+
+                self?.filterTask = Task { [weak self] in
                     await self?.updateFilteredChannels()
                 }
             }
@@ -125,7 +132,11 @@ public final class AppViewModel: ObservableObject {
             self.countries = ctrs.sorted { $0.name < $1.name }
             self.languages = langs.sorted { $0.name < $1.name }
             
-            await updateFilteredChannels()
+            // Bolt: Store reference and await for completion to ensure ready state is accurate
+            self.filterTask = Task {
+                await updateFilteredChannels()
+            }
+            _ = await filterTask?.value
             
             self.loadingState = .ready
         } catch {
@@ -144,6 +155,7 @@ public final class AppViewModel: ObservableObject {
         var categoryFilter: String?
         var countryFilter: String?
         var languageFilter: String?
+        var matchingIds: Set<String>?
         
         switch selectedTab {
         case .all:
@@ -155,24 +167,29 @@ public final class AppViewModel: ObservableObject {
         case .language(let code):
             languageFilter = code
         case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
+            matchingIds = favoriteIds
         case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
-            }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
+            matchingIds = Set(historyIds)
         }
         
-        self.filteredChannels = await filterEngine.filter(
+        let result = await filterEngine.filter(
             query: searchQuery,
             category: categoryFilter,
             country: countryFilter,
-            language: languageFilter
+            language: languageFilter,
+            matchingIds: matchingIds
         )
+
+        // Bolt: Check cancellation before updating UI state
+        if Task.isCancelled { return }
+
+        // For history, we need to preserve the viewing order (most recent first)
+        if case .history = selectedTab {
+            let channelMap = result.reduce(into: [String: Channel](minimumCapacity: result.count)) { $0[$1.id] = $1 }
+            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
+        } else {
+            self.filteredChannels = result
+        }
     }
     
     /// Начать воспроизведение выбранного канала
