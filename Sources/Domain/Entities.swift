@@ -94,7 +94,11 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         guard var components = components, components.scheme != nil else {
             // Fail-secure: If parsing fails even after encoding, try a simple regex-based mask
             // for common credential patterns to avoid returning a raw URL that might contain tokens.
-            return urlString.replacingOccurrences(of: "://[^@]+@", with: "://****@", options: .regularExpression)
+            if let regex = credentialMaskRegex {
+                let fullRange = NSRange(urlString.startIndex..<urlString.endIndex, in: urlString)
+                return regex.stringByReplacingMatches(in: urlString, range: fullRange, withTemplate: "://****@")
+            }
+            return urlString
         }
 
         // Mask user credentials
@@ -131,10 +135,12 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         return components.string ?? urlString
     }
 
+    private static let urlDetectionRegex: NSRegularExpression? = try? NSRegularExpression(pattern: #"https?://[^\s]+"#)
+    private static let credentialMaskRegex: NSRegularExpression? = try? NSRegularExpression(pattern: "://[^@]+@")
+
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
     public static func maskURLs(in text: String) -> String {
-        let pattern = #"https?://[^\s]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+        guard let regex = urlDetectionRegex else {
             return text
         }
 

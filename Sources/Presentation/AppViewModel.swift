@@ -39,6 +39,9 @@ public final class AppViewModel: ObservableObject {
     @Published public private(set) var historyIds: [String] = []
     @Published public var isPlayerDetached: Bool = false
     
+    // Управление задачами фильтрации для предотвращения гонок
+    private var filterTask: Task<Void, Never>?
+
     public let repository: any IPTVRepositoryProtocol
     public let filterEngine: any ChannelFilterEngineProtocol
     public let playerManager: any PlayerStateManagerProtocol
@@ -139,40 +142,55 @@ public final class AppViewModel: ObservableObject {
         await loadData()
     }
     
-    /// Обновление списка отфильтрованных каналов через FilterEngine
+    /// Обновление списка отфильтрованных каналов через FilterEngine с поддержкой отмены
     private func updateFilteredChannels() async {
-        var categoryFilter: String?
-        var countryFilter: String?
-        var languageFilter: String?
+        filterTask?.cancel()
         
-        switch selectedTab {
-        case .all:
-            break
-        case .category(let name):
-            categoryFilter = name
-        case .country(let code):
-            countryFilter = code
-        case .language(let code):
-            languageFilter = code
-        case .favorites:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            self.filteredChannels = allChannels.filter { favoriteIds.contains($0.id) }
-            return
-        case .history:
-            let allChannels = await filterEngine.filter(query: searchQuery, category: nil, country: nil, language: nil)
-            let channelMap = allChannels.reduce(into: [String: Channel](minimumCapacity: allChannels.count)) { map, channel in
-                map[channel.id] = channel
+        filterTask = Task {
+            var categoryFilter: String?
+            var countryFilter: String?
+            var languageFilter: String?
+            var matchingIds: Set<String>?
+
+            let currentTab = selectedTab
+
+            switch currentTab {
+            case .all:
+                break
+            case .category(let name):
+                categoryFilter = name
+            case .country(let code):
+                countryFilter = code
+            case .language(let code):
+                languageFilter = code
+            case .favorites:
+                matchingIds = favoriteIds
+            case .history:
+                matchingIds = Set(historyIds)
             }
-            self.filteredChannels = historyIds.compactMap { channelMap[$0] }
-            return
+
+            let results = await filterEngine.filter(
+                query: searchQuery,
+                category: categoryFilter,
+                country: countryFilter,
+                language: languageFilter,
+                matchingIds: matchingIds
+            )
+
+            if Task.isCancelled { return }
+
+            // Для вкладки истории без поиска сохраняем порядок просмотра
+            if case .history = currentTab, searchQuery.isEmpty {
+                let channelMap = results.reduce(into: [String: Channel](minimumCapacity: results.count)) { map, channel in
+                    map[channel.id] = channel
+                }
+                self.filteredChannels = historyIds.compactMap { channelMap[$0] }
+            } else {
+                self.filteredChannels = results
+            }
         }
         
-        self.filteredChannels = await filterEngine.filter(
-            query: searchQuery,
-            category: categoryFilter,
-            country: countryFilter,
-            language: languageFilter
-        )
+        await filterTask?.value
     }
     
     /// Начать воспроизведение выбранного канала

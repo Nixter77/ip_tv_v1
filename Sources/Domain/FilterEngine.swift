@@ -14,15 +14,34 @@ public protocol ChannelFilterEngineProtocol: Sendable {
     func setup(channels: [Channel], streams: [Stream]) async
     
     /// Фильтрация с использованием предвычисленных индексов (< 50мс)
+    /// - Parameters:
+    ///   - query: Текстовый поисковый запрос
+    ///   - category: Выбранная категория
+    ///   - country: Выбранная страна
+    ///   - language: Выбранный язык
+    ///   - matchingIds: Опциональный набор ID для ограничения области поиска (например, Избранное)
+    func filter(
+        query: String?,
+        category: String?,
+        country: String?,
+        language: String?,
+        matchingIds: Set<String>?
+    ) async -> [Channel]
+    
+    /// Получить все доступные потоки для конкретного канала
+    func streams(for channelId: String) async -> [Stream]
+}
+
+public extension ChannelFilterEngineProtocol {
+    /// Облегченная обертка для фильтрации без указания matchingIds
     func filter(
         query: String?,
         category: String?,
         country: String?,
         language: String?
-    ) async -> [Channel]
-    
-    /// Получить все доступные потоки для конкретного канала
-    func streams(for channelId: String) async -> [Stream]
+    ) async -> [Channel] {
+        await filter(query: query, category: category, country: country, language: language, matchingIds: nil)
+    }
 }
 
 /// Высокопроизводительная реализация ChannelFilterEngine в виде Swift Actor.
@@ -156,28 +175,37 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     ///   - category: Выбранная категория
     ///   - country: Выбранная страна
     ///   - language: Выбранный язык
+    ///   - matchingIds: Опциональный набор ID для ограничения области поиска (например, Избранное)
     /// - Returns: Список отфильтрованных и отсортированных каналов
     public func filter(
         query: String?,
         category: String?,
         country: String?,
-        language: String?
+        language: String?,
+        matchingIds: Set<String>? = nil
     ) async -> [Channel] {
         // Оптимизация: мгновенный возврат кэшированного списка, если фильтры не заданы
         let hasFilters = !(query ?? "").isEmpty ||
                          !(category ?? "").isEmpty ||
                          !(country ?? "").isEmpty ||
-                         !(language ?? "").isEmpty
+                         !(language ?? "").isEmpty ||
+                         matchingIds != nil
 
         if !hasFilters {
             return allChannelsSorted
         }
 
-        var resultSet: Set<String>? = nil
+        var resultSet: Set<String>? = matchingIds
         
         // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
-            resultSet = channelsByCategory[category.lowercased()] ?? []
+            let categorySet = channelsByCategory[category.lowercased()] ?? []
+            if var current = resultSet {
+                current.formIntersection(categorySet)
+                resultSet = current
+            } else {
+                resultSet = categorySet
+            }
             if resultSet?.isEmpty == true { return [] }
         }
         
@@ -256,9 +284,15 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             return allChannelsSorted
         }
         
-        // Оптимизация: вместо compactMap + sorted (O(M log M)),
-        // фильтруем уже отсортированный массив всех каналов за O(N).
-        return allChannelsSorted.filter { finalIds.contains($0.id) }
+        // Оптимизация: выбор алгоритма сборки результата в зависимости от его размера.
+        // Для маленьких выборок (M < 1000) быстрее извлечь объекты и отсортировать (O(M log M)).
+        // Для больших выборок (M >= 1000) быстрее профильтровать предсортированный мастер-список (O(N)).
+        if finalIds.count < 1000 {
+            return finalIds.compactMap { channels[$0] }
+                .sorted { $0.name < $1.name }
+        } else {
+            return allChannelsSorted.filter { finalIds.contains($0.id) }
+        }
     }
 
     /// Получить все доступные потоки для конкретного канала
