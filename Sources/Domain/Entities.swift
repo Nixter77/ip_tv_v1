@@ -58,6 +58,19 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
         return allowed
     }()
 
+    /// Pre-compiled regex for detecting URLs in unstructured text
+    private static let urlDetectionRegex: NSRegularExpression = {
+        let pattern = #"https?://[^\s,;()<>[\]{}'"]+"#
+        return try! NSRegularExpression(pattern: pattern)
+    }()
+
+    /// Pre-compiled regex for redacting sensitive parameter values (preserves keys)
+    private static let paramRegex: NSRegularExpression = {
+        // Targets patterns like key=value preceded by common delimiters: ?, &, /, |, ;, #
+        let pattern = #"(?<=[?&/|;#])([^?&/|;=\s#]+)=[^?&/|;#\s]+"#
+        return try! NSRegularExpression(pattern: pattern)
+    }()
+
     public var url: URL? {
         // Try standard parsing first.
         if let url = URL(string: urlString),
@@ -105,39 +118,26 @@ public struct Stream: Decodable, Equatable, Hashable, Sendable {
             }
         }
 
-        // Mask query parameter values to protect session tokens/keys
-        if let queryItems = components.queryItems {
-            components.queryItems = queryItems.map { URLQueryItem(name: $0.name, value: "****") }
-        }
-
-        // Some providers put token-like key=value data in path segments instead of a query string.
-        if components.queryItems == nil, components.path.contains("=") {
-            components.path = components.path
-                .split(separator: "/", omittingEmptySubsequences: false)
-                .map { segment in
-                    guard let equalsIndex = segment.firstIndex(of: "=") else {
-                        return String(segment)
-                    }
-                    return String(segment[...equalsIndex]) + "****"
-                }
-                .joined(separator: "/")
-        }
-
         // Mask fragments (anchors) as they often carry sensitive routing or session info
         if components.fragment != nil {
             components.fragment = "****"
         }
 
-        return components.string ?? urlString
+        // Unified parameter masking as defense-in-depth.
+        // This redacts values in both standard query strings and custom path/delimiter patterns.
+        let maskedUrl = components.string ?? urlString
+        let fullRange = NSRange(maskedUrl.startIndex..<maskedUrl.endIndex, in: maskedUrl)
+        return Self.paramRegex.stringByReplacingMatches(
+            in: maskedUrl,
+            options: [],
+            range: fullRange,
+            withTemplate: "$1=****"
+        )
     }
 
     /// Finds and masks all URLs within a text string to prevent sensitive data leakage in error messages or logs
     public static func maskURLs(in text: String) -> String {
-        let pattern = #"https?://[^\s]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return text
-        }
-
+        let regex = urlDetectionRegex
         var result = text
         let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, range: fullRange)
