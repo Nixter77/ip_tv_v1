@@ -233,12 +233,13 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
         }
     }
 
-    /// Retry с exponential backoff + jitter
+    /// Retry с exponential backoff + jitter. Cancellation never retried.
     private func dataWithRetry(for request: URLRequest, endpoint: Endpoint) async throws -> (Data, URLResponse) {
         var delayNs: UInt64 = 200_000_000 // 0.2s
         var lastError: Error = PlaylistFetchError.noData
 
         for attempt in 0..<maxAttempts {
+            try Task.checkCancellation()
             do {
                 let (data, response) = try await session.data(for: request)
                 if let http = response as? HTTPURLResponse {
@@ -252,6 +253,8 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                     }
                 }
                 return (data, response)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch let error as PlaylistFetchError {
                 throw error
             } catch let error as URLError {
@@ -263,6 +266,8 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                 }
                 throw error
             } catch {
+                // Do not retry cancellation-like cooperative cancels mis-typed as other errors
+                if error is CancellationError { throw error }
                 lastError = error
                 if attempt < maxAttempts - 1 {
                     try await Task.sleep(nanoseconds: delayNs + UInt64.random(in: 0...50_000_000))
@@ -315,16 +320,18 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
             }
 
             if http.statusCode == 304, let cachedData {
-                if let cache {
-                    try? cache.save(
-                        key: cacheKey,
-                        data: cachedData,
-                        etag: http.value(forHTTPHeaderField: "ETag") ?? cachedMeta?.etag,
-                        lastModified: http.value(forHTTPHeaderField: "Last-Modified") ?? cachedMeta?.lastModified
-                    )
-                }
                 do {
-                    return try decodeArray(from: cachedData, endpoint: endpoint)
+                    let items: [T] = try decodeArray(from: cachedData, endpoint: endpoint)
+                    // Refresh meta only after successful decode (avoid writing bad state)
+                    if let cache {
+                        try? cache.save(
+                            key: cacheKey,
+                            data: cachedData,
+                            etag: http.value(forHTTPHeaderField: "ETag") ?? cachedMeta?.etag,
+                            lastModified: http.value(forHTTPHeaderField: "Last-Modified") ?? cachedMeta?.lastModified
+                        )
+                    }
+                    return items
                 } catch {
                     cache?.remove(key: cacheKey)
                     // 304 без валидного тела — полный refetch без conditional headers
@@ -338,6 +345,8 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                             statusCode: (freshResponse as? HTTPURLResponse)?.statusCode ?? -1
                         )
                     }
+                    // Decode before save — never poison disk cache with corrupt 200 body
+                    let items: [T] = try decodeArray(from: freshData, endpoint: endpoint)
                     if let cache {
                         try? cache.save(
                             key: cacheKey,
@@ -346,7 +355,7 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                             lastModified: freshHTTP.value(forHTTPHeaderField: "Last-Modified")
                         )
                     }
-                    return try decodeArray(from: freshData, endpoint: endpoint)
+                    return items
                 }
             }
 
@@ -354,6 +363,8 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                 throw PlaylistFetchError.httpStatus(endpoint: endpoint.rawValue, statusCode: http.statusCode)
             }
 
+            // Decode before save so a corrupt 200 cannot overwrite a still-valid stale cache
+            let items: [T] = try decodeArray(from: data, endpoint: endpoint)
             if let cache {
                 try? cache.save(
                     key: cacheKey,
@@ -362,8 +373,9 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                     lastModified: http.value(forHTTPHeaderField: "Last-Modified")
                 )
             }
-
-            return try decodeArray(from: data, endpoint: endpoint)
+            return items
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             // Сеть/HTTP fail — stale cache (в т.ч. просроченный)
             if let cachedData {

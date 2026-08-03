@@ -16,7 +16,13 @@ public final class PlayerStateManager: NSObject, StreamPlayer {
     
     @Published public var preferredBitrate: Double = 0 {
         didSet {
-            let clamped = max(0, preferredBitrate)
+            // NaN/Inf: max(0, nan) is nan and nan != nan → infinite didSet recursion (stack overflow)
+            let clamped: Double
+            if preferredBitrate.isFinite {
+                clamped = max(0, preferredBitrate)
+            } else {
+                clamped = 0
+            }
             if clamped != preferredBitrate {
                 preferredBitrate = clamped
                 return

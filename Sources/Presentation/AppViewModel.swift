@@ -52,6 +52,8 @@ public final class AppViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var filterTask: Task<Void, Never>?
     private var revalidateTask: Task<Void, Never>?
+    /// Serializes catalog loads so soft reload + background revalidate cannot race UI state
+    private var loadTask: Task<Void, Never>?
     private var lastReloadAt: Date?
     private let reloadCooldown: TimeInterval = 5
 
@@ -150,6 +152,20 @@ public final class AppViewModel: ObservableObject {
     }
     
     public func loadData(soft: Bool = false) async {
+        // Cancel in-flight catalog work (including background revalidate) to avoid race overwrites
+        revalidateTask?.cancel()
+        revalidateTask = nil
+        loadTask?.cancel()
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performLoadData(soft: soft)
+        }
+        loadTask = task
+        await task.value
+    }
+
+    private func performLoadData(soft: Bool) async {
         let keepUI = soft && hasCatalog
         if keepUI {
             isRefreshing = true
@@ -186,7 +202,14 @@ public final class AppViewModel: ObservableObject {
             if result.shouldScheduleRevalidate {
                 scheduleBackgroundRevalidate()
             }
+        } catch is CancellationError {
+            isRefreshing = false
+            // Caller superseded this load — do not paint cancellation as a playlist error
         } catch {
+            guard !Task.isCancelled else {
+                isRefreshing = false
+                return
+            }
             isRefreshing = false
             let message = CatalogErrorMapper.userMessage(for: error)
             if keepUI {
@@ -219,8 +242,10 @@ public final class AppViewModel: ObservableObject {
             countries = result.countries
             languages = result.languages
             await updateFilteredChannels()
+        } catch is CancellationError {
+            // superseded
         } catch {
-            // keep current catalog
+            // keep current catalog (soft degrade)
         }
     }
     
@@ -329,11 +354,18 @@ public final class AppViewModel: ObservableObject {
             }
             return
         }
-        Task {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             do {
-                try await userLibrary.setFavorite(id: id, name: name, isFavorite: isFavorite)
+                try await self.userLibrary.setFavorite(id: id, name: name, isFavorite: isFavorite)
             } catch {
-                statusBanner = "Не удалось сохранить избранное"
+                // Rollback optimistic UI so star state matches durable store
+                if isFavorite {
+                    self.favoriteIds.remove(id)
+                } else {
+                    self.favoriteIds.insert(id)
+                }
+                self.statusBanner = "Не удалось сохранить избранное"
             }
         }
     }
@@ -355,6 +387,7 @@ public final class AppViewModel: ObservableObject {
         do {
             try await userLibrary.recordView(id: channel.id, name: channel.name)
         } catch {
+            // Keep session-local history (play already happened); warn that it won't survive restart
             statusBanner = "Не удалось сохранить историю просмотров"
         }
     }

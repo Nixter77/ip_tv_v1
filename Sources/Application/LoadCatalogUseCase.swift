@@ -64,6 +64,8 @@ public struct LoadCatalogUseCase: Sendable {
         let cats: [Category]
         do {
             cats = try await repository.fetchCategories(options: options)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             cats = fallbackCategories
             metaWarnings.append("категории")
@@ -72,6 +74,8 @@ public struct LoadCatalogUseCase: Sendable {
         let ctrs: [Country]
         do {
             ctrs = try await repository.fetchCountries(options: options)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             ctrs = fallbackCountries
             metaWarnings.append("страны")
@@ -80,6 +84,8 @@ public struct LoadCatalogUseCase: Sendable {
         let langs: [Language]
         do {
             langs = try await repository.fetchLanguages(options: options)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             langs = fallbackLanguages
             metaWarnings.append("языки")
@@ -102,6 +108,9 @@ public struct LoadCatalogUseCase: Sendable {
 /// Маппинг ошибок загрузки в user-facing текст (Application)
 public enum CatalogErrorMapper {
     public static func userMessage(for error: Error) -> String {
+        if error is CancellationError {
+            return "Загрузка плейлиста отменена."
+        }
         if let playlist = error as? PlaylistFetchError {
             return playlist.userMessage
         }
@@ -113,6 +122,8 @@ public enum CatalogErrorMapper {
                 return "Нет подключения к интернету. Проверьте сеть."
             case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
                 return "Не удалось подключиться к серверу плейлиста."
+            case .cancelled:
+                return "Загрузка плейлиста отменена."
             default:
                 break
             }
