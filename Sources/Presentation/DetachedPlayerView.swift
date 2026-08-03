@@ -6,22 +6,25 @@ import AVFoundation
 /// Окно видеоплеера в QuickTime-стиле для отдельного просмотра.
 public struct DetachedPlayerView: View {
     @ObservedObject var viewModel: AppViewModel
+    /// Изолированная подписка на плеер — не трогает list-биндинги AppViewModel
+    @ObservedObject private var playerManager: PlayerStateManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var escapeMonitor: Any? = nil
 
     public init(viewModel: AppViewModel) {
         self.viewModel = viewModel
+        _playerManager = ObservedObject(wrappedValue: viewModel.playerManager)
     }
 
     public var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let channel = viewModel.playerManager.currentChannel {
+            if let channel = playerManager.currentChannel {
                 QuickTimeVideoContainer(
-                    player: viewModel.playerManager.avPlayer,
-                    playerState: viewModel.playerManager.state,
+                    player: playerManager.avPlayer,
+                    playerState: playerManager.state,
                     channelName: channel.name,
                     isFavorite: viewModel.favoriteIds.contains(channel.id),
                     onToggleFullscreen: {
@@ -32,9 +35,12 @@ public struct DetachedPlayerView: View {
                     onToggleFavorite: {
                         viewModel.toggleFavorite(channelId: channel.id)
                     },
+                    onRetry: {
+                        Task { await viewModel.retryPlayback() }
+                    },
                     preferredBitrate: Binding(
-                        get: { viewModel.playerManager.preferredBitrate },
-                        set: { viewModel.playerManager.preferredBitrate = $0 }
+                        get: { playerManager.preferredBitrate },
+                        set: { playerManager.preferredBitrate = $0 }
                     )
                 )
             } else {
@@ -48,7 +54,7 @@ public struct DetachedPlayerView: View {
             }
         }
         .frame(minWidth: 640, minHeight: 360)
-        .navigationTitle(viewModel.playerManager.currentChannel?.name ?? "Проигрыватель")
+        .navigationTitle(playerManager.currentChannel?.name ?? "Проигрыватель")
         .background(WindowAccessor { window in
             window.isMovableByWindowBackground = true
         })

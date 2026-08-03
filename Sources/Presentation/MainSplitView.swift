@@ -2,66 +2,83 @@
 // Sources/Presentation/MainSplitView.swift
 import SwiftUI
 import AVFoundation
+import AppKit
 
-/// Основной трехпанельный макет приложения IPTVPlayer
+/// Основной трехпанельный макет приложения IPTVPlayer.
+/// Важно: playerManager наблюдается только в `PlayerDetailColumn`, а не здесь —
+/// иначе каждый tick буферизации пересобирал бы List каналов.
 public struct MainSplitView: View {
-    @StateObject private var viewModel: AppViewModel
-    
-    // FocusState для быстрого фокуса на поиске по ⌘F
-    @FocusState private var isSearchFocused: Bool
+    /// Owned by `IPTVApp` as `@StateObject` — here only observe (do not re-wrap as StateObject).
+    @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var commands: AppCommandCenter
     
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     
-    // Выбранный в списке канал
     @State private var selectedChannel: Channel?
-    
-    // Монитор клавиатурных событий для отслеживания клавиши Esc
     @State private var escapeMonitor: Any? = nil
+    /// True while the channel search field is first responder (space = type, not pause).
+    @State private var isSearchFieldActive = false
     
-    /// Инициализатор с инжекцией ViewModel
-    public init(viewModel: AppViewModel) {
-        _viewModel = StateObject(wrappedValue: viewModel)
+    public init(viewModel: AppViewModel, commands: AppCommandCenter) {
+        self.viewModel = viewModel
+        self.commands = commands
     }
     
     public var body: some View {
-        NavigationSplitView {
-            // Панель 1: Sidebar
-            sidebarView
-                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
-        } content: {
-            // Панель 2: Список каналов
-            channelListView
-                .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 450)
-        } detail: {
-            // Панель 3: Плеер и детали
-            playerDetailView
-        }
-        .task {
-            // Загружаем плейлист при старте
-            await viewModel.loadData()
-        }
-        // Глобальные клавиатурные шорткаты
-        .background(
-            Button("") {
-                isSearchFocused = true
-            }
-            .keyboardShortcut("f", modifiers: .command)
-            .opacity(0)
-            .allowsHitTesting(false)
-        )
-        .background(
-            Button("") {
-                Task {
-                    await viewModel.reloadPlaylist()
+        VStack(spacing: 0) {
+            if let banner = viewModel.statusBanner {
+                StatusBannerView(message: banner) {
+                    viewModel.dismissStatusBanner()
                 }
             }
-            .keyboardShortcut("r", modifiers: .command)
-            .opacity(0)
-            .allowsHitTesting(false)
-        )
+            if viewModel.isRefreshing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Обновление плейлиста…")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(NSColor.controlBackgroundColor))
+            }
+
+            NavigationSplitView {
+                SidebarColumn(viewModel: viewModel)
+                    .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
+            } content: {
+                ChannelListColumn(
+                    viewModel: viewModel,
+                    commands: commands,
+                    selectedChannel: $selectedChannel,
+                    isSearchFieldActive: $isSearchFieldActive
+                )
+                .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 450)
+            } detail: {
+                PlayerDetailColumn(
+                    viewModel: viewModel,
+                    playerManager: viewModel.playerManager,
+                    openWindow: openWindow,
+                    dismissWindow: dismissWindow
+                )
+            }
+        }
+        .task {
+            await viewModel.loadData()
+        }
+        .onChange(of: commands.reloadGeneration) { _, _ in
+            Task {
+                await viewModel.reloadPlaylist()
+            }
+        }
+        .onChange(of: commands.focusSearchGeneration) { _, _ in
+            // ChannelListColumn observes the same command center
+        }
         .onKeyPress(.space) {
-            if isSearchFocused {
+            if isSearchFieldActive {
                 return .ignored
             }
             togglePlayPause()
@@ -69,10 +86,10 @@ public struct MainSplitView: View {
         }
         .onAppear {
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                if event.keyCode == 53 { // Клавиша Esc
+                if event.keyCode == 53 {
                     if let window = NSApp.keyWindow, window.styleMask.contains(.fullScreen) {
                         window.toggleFullScreen(nil)
-                        return nil // Событие обработано
+                        return nil
                     }
                 }
                 return event
@@ -84,10 +101,31 @@ public struct MainSplitView: View {
                 escapeMonitor = nil
             }
         }
+        .onChange(of: selectedChannel) { _, newChannel in
+            if let channel = newChannel {
+                Task {
+                    await viewModel.play(channel: channel)
+                }
+            }
+        }
     }
     
-    // MARK: - 1. Sidebar View
-    private var sidebarView: some View {
+    private func togglePlayPause() {
+        let player = viewModel.playerManager.avPlayer
+        if player.rate > 0 {
+            player.pause()
+        } else if player.currentItem != nil {
+            player.play()
+        }
+    }
+}
+
+// MARK: - Sidebar (AppViewModel only)
+
+private struct SidebarColumn: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
         List(selection: Binding(
             get: { viewModel.selectedTab },
             set: { tab in
@@ -144,9 +182,8 @@ public struct MainSplitView: View {
             }
         }
         .listStyle(SidebarListStyle())
-        .padding(.top, 40) // Отступ сверху для компенсации скрытого TitleBar macOS drag-зоны!
+        .padding(.top, 40)
         .safeAreaInset(edge: .bottom) {
-            // Кнопка перезагрузки внизу сайдбара
             HStack {
                 Button(action: {
                     Task {
@@ -167,33 +204,24 @@ public struct MainSplitView: View {
             .background(VisualEffectView(material: .sidebar, blendingMode: .withinWindow).opacity(0.8))
         }
     }
-    
-    // MARK: - 2. Channel List View
-    private var channelListView: some View {
+}
+
+// MARK: - Channel list (owns FocusState locally — never pass FocusState.Binding across views)
+
+private struct ChannelListColumn: View {
+    @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var commands: AppCommandCenter
+    @Binding var selectedChannel: Channel?
+    @Binding var isSearchFieldActive: Bool
+
+    /// Must live in the same view as `.focused` — crossing view boundaries breaks macOS focus.
+    @FocusState private var isSearchFocused: Bool
+
+    var body: some View {
         VStack(spacing: 0) {
-            // Кастомная строка поиска с Rich Aesthetics
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
-                TextField("Поиск канала... (⌘F)", text: $viewModel.searchQuery)
-                    .textFieldStyle(.plain)
-                    .focused($isSearchFocused)
-                if !viewModel.searchQuery.isEmpty {
-                    Button(action: { viewModel.searchQuery = "" }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Очистить поиск")
-                    .accessibilityLabel("Очистить поиск")
-                }
-            }
-            .padding(8)
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(8)
-            .padding([.horizontal, .bottom])
-            .padding(.top, 40) // Отступ сверху для компенсации скрытого TitleBar macOS drag-зоны!
-            .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+            searchBar
+                .padding([.horizontal, .bottom])
+                .padding(.top, 40)
             
             if viewModel.loadingState == .loading {
                 Spacer()
@@ -221,49 +249,7 @@ public struct MainSplitView: View {
                 Spacer()
             } else if viewModel.filteredChannels.isEmpty {
                 Spacer()
-                VStack(spacing: 16) {
-                    if viewModel.selectedTab == .favorites {
-                        Image(systemName: "heart")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-                        Text("В избранном пусто")
-                            .font(.title3)
-                            .foregroundColor(.secondary)
-                        Button("Перейти ко всем каналам") {
-                            viewModel.selectedTab = .all
-                        }
-                        .buttonStyle(.bordered)
-                    } else if viewModel.selectedTab == .history {
-                        Image(systemName: "clock")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-                        Text("История пуста")
-                            .font(.title3)
-                            .foregroundColor(.secondary)
-                        Button("Перейти ко всем каналам") {
-                            viewModel.selectedTab = .all
-                        }
-                        .buttonStyle(.bordered)
-                    } else if !viewModel.searchQuery.isEmpty {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-                        Text("Ничего не найдено")
-                            .font(.title3)
-                            .foregroundColor(.secondary)
-                        Button("Очистить поиск") {
-                            viewModel.searchQuery = ""
-                        }
-                        .buttonStyle(.bordered)
-                    } else {
-                        Image(systemName: "tv")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-                        Text("Каналы не найдены")
-                            .font(.title3)
-                            .foregroundColor(.secondary)
-                    }
-                }
+                emptyState
                 Spacer()
             } else {
                 List(viewModel.filteredChannels, id: \.id, selection: $selectedChannel) { channel in
@@ -279,21 +265,117 @@ public struct MainSplitView: View {
                 .listStyle(PlainListStyle())
             }
         }
-        .onChange(of: selectedChannel) { _, newChannel in
-            if let channel = newChannel {
-                Task {
-                    await viewModel.play(channel: channel)
+        .onChange(of: isSearchFocused) { _, focused in
+            isSearchFieldActive = focused
+        }
+        .onChange(of: commands.focusSearchGeneration) { _, _ in
+            focusSearchField()
+        }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+            TextField("Поиск канала... (⌘F)", text: $viewModel.searchQuery)
+                .textFieldStyle(.plain)
+                .focused($isSearchFocused)
+                .onSubmit {
+                    // Keep focus after submit so continued typing works
+                    isSearchFocused = true
                 }
+            if !viewModel.searchQuery.isEmpty {
+                Button(action: { viewModel.searchQuery = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Очистить поиск")
+                .accessibilityLabel("Очистить поиск")
+            }
+        }
+        .padding(8)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+        // Prefer this field when the content column becomes focused (macOS focus engine)
+        .focusSection()
+    }
+
+    private func focusSearchField() {
+        // Bring the app window forward when shortcut fired while another app had focus
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeKey }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+        // Defer one run-loop turn so key window is established before FocusState applies
+        DispatchQueue.main.async {
+            isSearchFocused = true
+            isSearchFieldActive = true
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            if viewModel.selectedTab == .favorites {
+                Image(systemName: "heart")
+                    .font(.system(size: 40))
+                    .foregroundColor(.secondary)
+                Text("В избранном пусто")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+                Button("Перейти ко всем каналам") {
+                    viewModel.selectedTab = .all
+                }
+                .buttonStyle(.bordered)
+            } else if viewModel.selectedTab == .history {
+                Image(systemName: "clock")
+                    .font(.system(size: 40))
+                    .foregroundColor(.secondary)
+                Text("История пуста")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+                Button("Перейти ко всем каналам") {
+                    viewModel.selectedTab = .all
+                }
+                .buttonStyle(.bordered)
+            } else if !viewModel.searchQuery.isEmpty {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 40))
+                    .foregroundColor(.secondary)
+                Text("Ничего не найдено")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+                Button("Очистить поиск") {
+                    viewModel.searchQuery = ""
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Image(systemName: "tv")
+                    .font(.system(size: 40))
+                    .foregroundColor(.secondary)
+                Text("Каналы не найдены")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
             }
         }
     }
-    
-    // MARK: - 3. Player Detail View (QuickTime стиль)
-    private var playerDetailView: some View {
+}
+
+// MARK: - Player detail (observes PlayerStateManager in isolation)
+
+private struct PlayerDetailColumn: View {
+    @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var playerManager: PlayerStateManager
+    let openWindow: OpenWindowAction
+    let dismissWindow: DismissWindowAction
+
+    var body: some View {
         ZStack {
             Color.black
 
-            if let channel = viewModel.playerManager.currentChannel {
+            if let channel = playerManager.currentChannel {
                 if viewModel.isPlayerDetached {
                     VStack(spacing: 16) {
                         Image(systemName: "tv.and.mediabox")
@@ -310,9 +392,9 @@ public struct MainSplitView: View {
                     }
                 } else {
                     QuickTimeVideoContainer(
-                        player: viewModel.playerManager.avPlayer,
-                        playerState: viewModel.playerManager.state,
-                        channelName: viewModel.playerManager.currentChannel?.name,
+                        player: playerManager.avPlayer,
+                        playerState: playerManager.state,
+                        channelName: channel.name,
                         isFavorite: viewModel.favoriteIds.contains(channel.id),
                         onToggleFullscreen: {
                             if let window = NSApp.keyWindow {
@@ -326,9 +408,12 @@ public struct MainSplitView: View {
                         onToggleFavorite: {
                             viewModel.toggleFavorite(channelId: channel.id)
                         },
+                        onRetry: {
+                            Task { await viewModel.retryPlayback() }
+                        },
                         preferredBitrate: Binding(
-                            get: { viewModel.playerManager.preferredBitrate },
-                            set: { viewModel.playerManager.preferredBitrate = $0 }
+                            get: { playerManager.preferredBitrate },
+                            set: { playerManager.preferredBitrate = $0 }
                         )
                     )
                     .ignoresSafeArea()
@@ -345,55 +430,30 @@ public struct MainSplitView: View {
             }
         }
     }
-    
-    private func togglePlayPause() {
-        let player = viewModel.playerManager.avPlayer
-        if player.rate > 0 {
-            player.pause()
-        } else if player.currentItem != nil {
-            player.play()
-        }
-    }
 }
 
-// MARK: - Строка Списка Каналов (ChannelRowView)
+// MARK: - Строка Списка Каналов (предвычисленные display-поля)
 struct ChannelRowView: View {
     let channel: Channel
     let isFavorite: Bool
     let onFavoriteToggle: () -> Void
+
+    private let logoURL: URL?
+    private let languagesLabel: String
     
     @State private var isHovered = false
+
+    init(channel: Channel, isFavorite: Bool, onFavoriteToggle: @escaping () -> Void) {
+        self.channel = channel
+        self.isFavorite = isFavorite
+        self.onFavoriteToggle = onFavoriteToggle
+        self.logoURL = channel.logo.flatMap { URL(string: $0) }
+        self.languagesLabel = channel.languages.joined(separator: ", ").uppercased()
+    }
     
     var body: some View {
         HStack(spacing: 12) {
-            // Логотип с AsyncImage и кастомным Gradient Placeholder
-            AsyncImage(url: channel.logo.flatMap { URL(string: $0) }) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 44, height: 44)
-                        .cornerRadius(6)
-                        .accessibilityLabel("Логотип канала \(channel.name)")
-                default:
-                    // Красивый градиентный плейсхолдер с первой буквой канала
-                    ZStack {
-                        LinearGradient(
-                            colors: [Color.blue.opacity(0.7), Color.purple.opacity(0.7)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        Text(String(channel.name.prefix(1)).uppercased())
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .fontWeight(.bold)
-                    }
-                    .frame(width: 44, height: 44)
-                    .cornerRadius(6)
-                    .accessibilityLabel("Логотип \(channel.name) отсутствует")
-                }
-            }
+            ChannelLogoView(url: logoURL, name: channel.name)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(channel.name)
@@ -409,8 +469,8 @@ struct ChannelRowView: View {
                             .background(Color.secondary.opacity(0.15))
                             .cornerRadius(4)
                     }
-                    if !channel.languages.isEmpty {
-                        Text(channel.languages.joined(separator: ", ").uppercased())
+                    if !languagesLabel.isEmpty {
+                        Text(languagesLabel)
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -419,7 +479,6 @@ struct ChannelRowView: View {
             
             Spacer()
             
-            // Кнопка избранного, появляется при hover или если уже в избранном
             Button(action: onFavoriteToggle) {
                 Image(systemName: isFavorite ? "heart.fill" : "heart")
                     .foregroundColor(isFavorite ? .pink : .secondary)
@@ -454,7 +513,36 @@ struct ChannelRowView: View {
     }
 }
 
-// MARK: - Вспомогательная вьюха для размытия (VisualEffectView)
+// MARK: - Status banner (persistence / soft-reload / cooldown)
+
+private struct StatusBannerView: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+            Text(message)
+                .font(.callout)
+                .foregroundColor(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Скрыть")
+            .accessibilityLabel("Скрыть уведомление")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.15))
+    }
+}
+
+// MARK: - VisualEffectView
 struct VisualEffectView: NSViewRepresentable {
     let material: NSVisualEffectView.Material
     let blendingMode: NSVisualEffectView.BlendingMode

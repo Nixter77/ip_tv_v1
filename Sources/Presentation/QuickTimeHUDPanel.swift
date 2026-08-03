@@ -115,6 +115,9 @@ public struct QuickTimeHUDPanel: View {
     @State private var isSeeking: Bool = false
     @State private var volume: Float = 1.0
     @State private var timeObserverToken: Any?
+    /// Live IPTV: indefinite duration — throttle UI updates
+    @State private var isLiveStream: Bool = false
+    @State private var lastLiveUIUpdate: TimeInterval = 0
 
     public init(
         player: AVPlayer,
@@ -231,29 +234,44 @@ public struct QuickTimeHUDPanel: View {
 
     private var timelineView: some View {
         VStack(spacing: 4) {
-            Slider(
-                value: Binding(
-                    get: { isSeeking ? currentTime : currentTime },
-                    set: { newValue in
-                        currentTime = newValue
-                        let cmTime = CMTime(seconds: newValue, preferredTimescale: 600)
-                        player.seek(to: cmTime)
-                    }
-                ),
-                in: 0...max(duration, 1),
-                onEditingChanged: { editing in isSeeking = editing }
-            )
-            .controlSize(.mini)
-            .tint(.white)
+            if isLiveStream {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 6, height: 6)
+                    Text("LIVE")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+                    Text(formatTime(currentTime))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            } else {
+                Slider(
+                    value: Binding(
+                        get: { currentTime },
+                        set: { newValue in
+                            currentTime = newValue
+                            let cmTime = CMTime(seconds: newValue, preferredTimescale: 600)
+                            player.seek(to: cmTime)
+                        }
+                    ),
+                    in: 0...max(duration, 1),
+                    onEditingChanged: { editing in isSeeking = editing }
+                )
+                .controlSize(.mini)
+                .tint(.white)
 
-            HStack {
-                Text(formatTime(currentTime))
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.5))
-                Spacer()
-                Text(formatTime(duration - currentTime))
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.5))
+                HStack {
+                    Text(formatTime(currentTime))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                    Spacer()
+                    Text(formatTime(duration - currentTime))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                }
             }
         }
     }
@@ -279,13 +297,30 @@ public struct QuickTimeHUDPanel: View {
 
     private func setupTimeObserver() {
         removeTimeObserver()
-        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+        // 1s base interval (was 0.5s); live streams further throttle @State writes
+        let interval = CMTime(seconds: 1.0, preferredTimescale: 600)
         let token = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
             guard !isSeeking else { return }
-            currentTime = time.seconds
-            if let item = player.currentItem,
-               item.duration.seconds.isFinite && !item.duration.seconds.isNaN {
-                duration = item.duration.seconds
+
+            let seconds = time.seconds
+            if let item = player.currentItem {
+                let dur = item.duration.seconds
+                let live = !(dur.isFinite && !dur.isNaN && dur > 0)
+                if live != isLiveStream {
+                    isLiveStream = live
+                }
+                if !live {
+                    duration = dur
+                    currentTime = seconds
+                } else {
+                    // Live: update clock at most every 2s to cut SwiftUI invalidations
+                    if seconds - lastLiveUIUpdate >= 2.0 {
+                        lastLiveUIUpdate = seconds
+                        currentTime = seconds
+                    }
+                }
+            } else {
+                currentTime = seconds
             }
         }
         timeObserverToken = token
@@ -321,6 +356,7 @@ public struct QuickTimeVideoContainer: View {
     var onToggleFullscreen: (() -> Void)?
     var onDetachPlayer: (() -> Void)?
     var onToggleFavorite: (() -> Void)?
+    var onRetry: (() -> Void)?
     var preferredBitrate: Binding<Double>?
 
     @State private var hudVisible: Bool = true
@@ -333,6 +369,7 @@ public struct QuickTimeVideoContainer: View {
         onToggleFullscreen: (() -> Void)? = nil,
         onDetachPlayer: (() -> Void)? = nil,
         onToggleFavorite: (() -> Void)? = nil,
+        onRetry: (() -> Void)? = nil,
         preferredBitrate: Binding<Double>? = nil
     ) {
         self.player = player
@@ -342,6 +379,7 @@ public struct QuickTimeVideoContainer: View {
         self.onToggleFullscreen = onToggleFullscreen
         self.onDetachPlayer = onDetachPlayer
         self.onToggleFavorite = onToggleFavorite
+        self.onRetry = onRetry
         self.preferredBitrate = preferredBitrate
     }
 
@@ -349,8 +387,8 @@ public struct QuickTimeVideoContainer: View {
         ZStack {
             VideoPlayerView(player: player)
 
-            // Буферизация / ошибки
-            PlayerHUDOverlay(state: playerState, onRetry: nil)
+            // Буферизация / ошибки (+ retry)
+            PlayerHUDOverlay(state: playerState, onRetry: onRetry)
 
             // QuickTime HUD при воспроизведении
             if case .playing = playerState {

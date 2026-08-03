@@ -151,4 +151,38 @@ final class ChannelFilterEngineTests: XCTestCase {
         XCTAssertLessThan(filterDuration, 0.080, "Filter duration must be under 80ms in Debug mode")
         XCTAssertFalse(filtered.isEmpty)
     }
+
+    /// restrictedTo ограничивает поиск избранным без полного скана результата «всех»
+    func test_restrictedToFavorites() async {
+        let channels = [
+            makeChannel(id: "a", name: "Alpha News", country: "US", languages: ["eng"]),
+            makeChannel(id: "b", name: "Beta Sport", country: "US", languages: ["eng"]),
+            makeChannel(id: "c", name: "Gamma News", country: "UK", languages: ["eng"])
+        ]
+        let streams = channels.map { makeStream(channel: $0.id) }
+        await engine.setup(channels: channels, streams: streams)
+
+        let favorites: Set<String> = ["a", "c"]
+        let filtered = await engine.filter(
+            query: "news",
+            category: nil,
+            country: nil,
+            language: nil,
+            restrictedTo: favorites
+        )
+        XCTAssertEqual(Set(filtered.map(\.id)), Set(["a", "c"]))
+    }
+
+    /// channels(preservingOrder:) сохраняет порядок истории
+    func test_channelsPreservingOrder() async {
+        let channels = [
+            makeChannel(id: "a", name: "A"),
+            makeChannel(id: "b", name: "B"),
+            makeChannel(id: "c", name: "C")
+        ]
+        await engine.setup(channels: channels, streams: channels.map { makeStream(channel: $0.id) })
+
+        let ordered = await engine.channels(preservingOrder: ["c", "a", "missing", "b"])
+        XCTAssertEqual(ordered.map(\.id), ["c", "a", "b"])
+    }
 }

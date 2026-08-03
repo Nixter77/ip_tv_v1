@@ -41,7 +41,8 @@ final class ChannelRepositoryTests: XCTestCase {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [URLProtocolMock.self]
         session = URLSession(configuration: config)
-        repository = IPTVRepository(session: session)
+        // diskCache: nil — изоляция тестов от дискового кэша и 304/stale fallback
+        repository = IPTVRepository(session: session, diskCache: nil)
         URLProtocolMock.mockData.removeAll()
     }
 

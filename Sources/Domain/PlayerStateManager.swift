@@ -1,82 +1,64 @@
 #if canImport(AVFoundation) && canImport(Combine)
 // Sources/Domain/PlayerStateManager.swift
+// Playback infrastructure adapter: Domain StreamPlayer + AVPlayer UI surface.
+// PlayerState / StreamPlayer live in Domain/Ports/StreamPlayer.swift
 import Foundation
 import AVFoundation
 import Combine
 
-/// Состояния проигрывателя
-public enum PlayerState: Equatable, Sendable {
-    case idle
-    case loading(stream: Stream)
-    case playing(stream: Stream)
-    case failed(stream: Stream, error: String)
-}
-
-/// Управление воспроизведением и авто-фолбэками
+/// AVFoundation adapter + playback policy (fallback, timeout, stall, retry)
 @MainActor
-public protocol PlayerStateManagerProtocol: AnyObject, ObservableObject where ObjectWillChangePublisher == ObservableObjectPublisher {
-    /// Текущее состояние плеера
-    var state: PlayerState { get }
-    
-    /// Текущий проигрываемый канал
-    var currentChannel: Channel? { get }
-    
-    /// Экземпляр AVPlayer для SwiftUI AVPlayerView
-    var avPlayer: AVPlayer { get }
-    
-    /// Начать воспроизведение канала (с авто-фолбэком на резервные потоки)
-    func play(channel: Channel, streams: [Stream]) async
-    
-    /// Остановить воспроизведение
-    func stop()
-    
-    /// Предпочтительный максимальный битрейт в bps (0 = авто)
-    var preferredBitrate: Double { get set }
-}
-
-/// Реализация PlayerStateManager с поддержкой авто-фолбэков, таймаутов и отмены при переключении
-@MainActor
-public final class PlayerStateManager: NSObject, PlayerStateManagerProtocol {
+public final class PlayerStateManager: NSObject, StreamPlayer {
     @Published public private(set) var state: PlayerState = .idle
     @Published public private(set) var currentChannel: Channel?
+    /// UI bridge — not part of StreamPlayer port
     public let avPlayer: AVPlayer = AVPlayer()
     
     @Published public var preferredBitrate: Double = 0 {
         didSet {
-            avPlayer.currentItem?.preferredPeakBitRate = preferredBitrate
+            let clamped = max(0, preferredBitrate)
+            if clamped != preferredBitrate {
+                preferredBitrate = clamped
+                return
+            }
+            avPlayer.currentItem?.preferredPeakBitRate = clamped
         }
     }
     
     private let timeoutInterval: TimeInterval
+    /// Сколько ждать в `.waitingToPlayAtSpecifiedRate` до fallback
+    private let stallInterval: TimeInterval
     
-    // Хранилище для отмены текущих задач
     private var timeoutTask: Task<Void, Never>?
+    private var stallTask: Task<Void, Never>?
     private var itemStatusObservation: NSKeyValueObservation?
+    private var timeControlObservation: NSKeyValueObservation?
     
-    // Логика фолбэков
     private var streamsToTry: [Stream] = []
     private var currentStreamIndex: Int = 0
 
-    /// Инициализатор PlayerStateManager
-    /// - Parameter timeoutInterval: Таймаут загрузки потока в секундах (по умолчанию 8.0)
-    public init(timeoutInterval: TimeInterval = 8.0) {
+    public init(timeoutInterval: TimeInterval = 8.0, stallInterval: TimeInterval = 12.0) {
         self.timeoutInterval = timeoutInterval
+        self.stallInterval = stallInterval
         super.init()
     }
 
     deinit {
         let observation = itemStatusObservation
+        let timeControl = timeControlObservation
         let task = timeoutTask
+        let stall = stallTask
         let player = avPlayer
         
         DispatchQueue.main.async {
             observation?.invalidate()
+            timeControl?.invalidate()
             task?.cancel()
+            stall?.cancel()
             player.replaceCurrentItem(with: nil)
         }
     }
 
-    /// Начать воспроизведение канала
     public func play(channel: Channel, streams: [Stream]) async {
         resetCurrentPlayback()
         
@@ -93,21 +75,32 @@ public final class PlayerStateManager: NSObject, PlayerStateManagerProtocol {
         await playCurrentStream()
     }
 
-    /// Остановить воспроизведение и высвободить все ресурсы
+    /// Повтор с первого потока (кнопка «Попробовать снова»)
+    public func retry() async {
+        guard let channel = currentChannel, !streamsToTry.isEmpty else { return }
+        await play(channel: channel, streams: streamsToTry)
+    }
+
     public func stop() {
         resetCurrentPlayback()
         self.state = .idle
         self.currentChannel = nil
+        self.streamsToTry = []
+        self.currentStreamIndex = 0
     }
 
-    // MARK: - Внутренние методы управления воспроизведением
+    // MARK: - Internal
 
     private func resetCurrentPlayback() {
         timeoutTask?.cancel()
         timeoutTask = nil
+        stallTask?.cancel()
+        stallTask = nil
         
         itemStatusObservation?.invalidate()
         itemStatusObservation = nil
+        timeControlObservation?.invalidate()
+        timeControlObservation = nil
         
         avPlayer.pause()
         avPlayer.replaceCurrentItem(with: nil)
@@ -151,6 +144,7 @@ public final class PlayerStateManager: NSObject, PlayerStateManagerProtocol {
         avPlayer.replaceCurrentItem(with: playerItem)
         
         setupObservation(for: avPlayer.currentItem)
+        setupTimeControlObservation()
         setupTimeoutTimer(for: stream)
         
         avPlayer.play()
@@ -167,6 +161,49 @@ public final class PlayerStateManager: NSObject, PlayerStateManagerProtocol {
                 self.handleItemStatusChange(playerItem)
             }
         }
+    }
+
+    private func setupTimeControlObservation() {
+        timeControlObservation?.invalidate()
+        timeControlObservation = avPlayer.observe(\.timeControlStatus, options: [.new, .initial]) { [weak self] player, _ in
+            guard let self = self else { return }
+            Task { @MainActor in
+                self.handleTimeControlStatus(player.timeControlStatus)
+            }
+        }
+    }
+
+    private func handleTimeControlStatus(_ status: AVPlayer.TimeControlStatus) {
+        switch status {
+        case .playing:
+            stallTask?.cancel()
+            stallTask = nil
+        case .waitingToPlayAtSpecifiedRate:
+            // Stall only after we've reached playing/loading with an item
+            guard case .playing = state else { return }
+            scheduleStallWatchdog()
+        case .paused:
+            stallTask?.cancel()
+            stallTask = nil
+        @unknown default:
+            break
+        }
+    }
+
+    private func scheduleStallWatchdog() {
+        stallTask?.cancel()
+        let interval = stallInterval
+        stallTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.handleStall()
+        }
+    }
+
+    private func handleStall() async {
+        guard case .playing(let stream) = state else { return }
+        guard avPlayer.timeControlStatus == .waitingToPlayAtSpecifiedRate else { return }
+        await handleStreamFailure(stream: stream, error: "Поток завис (нет данных \(Int(stallInterval))с)")
     }
 
     private func handleItemStatusChange(_ item: AVPlayerItem) {

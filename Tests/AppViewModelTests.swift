@@ -18,7 +18,7 @@ final class AppViewModelTests: XCTestCase {
         config.protocolClasses = [URLProtocolMock.self]
         
         let newSession = URLSession(configuration: config)
-        let newRepository = IPTVRepository(session: newSession)
+        let newRepository = IPTVRepository(session: newSession, diskCache: nil)
         let newFilterEngine = ChannelFilterEngine()
         let newPlayerManager = PlayerStateManager()
 
