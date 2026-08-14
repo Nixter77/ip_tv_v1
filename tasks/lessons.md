@@ -1,5 +1,9 @@
 # Lessons Learned
 
+## 4. Recurring review loops must not rewrite public APIs while the main session is implementing
+- **Problem**: A 5-minute scheduled fire rewrote `RemoteURLPolicy` with a different surface while the main session was still landing call sites. Compile broke (`no member`), then the file flip-flopped.
+- **Solution**: After “fix all”, set the stored prompt to read-only (or `scheduler_delete`). Never let two writers own the same type. Extend the fire’s API in place instead of replacing the file.
+
 ## 3. macOS search focus: never pass FocusState across views; never use invisible Button for ⌘F
 - **Problem**: `@FocusState` owned by parent and passed as `FocusState<Bool>.Binding` into a child broke `.focused` on the search `TextField`. Invisible `Button` + `.opacity(0)` + `.keyboardShortcut` never entered the key view loop, so ⌘F stayed in Xcode/other apps. Double-wrapping the app’s `AppViewModel` as `@StateObject` inside `MainSplitView` also risked broken identity.
 - **Solution**: Own `@FocusState` in the same view as the `TextField`. Use `.commands { Button(...).keyboardShortcut("f") }` + `NotificationCenter` to focus. Parent holds ViewModel as `@ObservedObject` only. Call `NSApp.activate` + deferred `isSearchFocused = true` on shortcut.

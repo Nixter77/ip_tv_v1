@@ -64,6 +64,31 @@ final class SwiftDataTests: XCTestCase {
         let itemsAfterDelete = try context.fetch(descriptor)
         XCTAssertTrue(itemsAfterDelete.isEmpty, "Объект должен быть успешно удален из базы")
     }
+
+    func test_recordView_prunesHistoryBeyondLimit() async throws {
+        let library = SwiftDataUserLibraryRepository(modelContext: context, historyLimit: 3)
+        for i in 1...5 {
+            try await library.recordView(id: "ch\(i)", name: "Channel \(i)")
+        }
+        let items = try context.fetch(FetchDescriptor<PersistedChannel>())
+        XCTAssertEqual(items.count, 3)
+        let state = try await library.load()
+        XCTAssertEqual(state.historyIds.count, 3)
+        XCTAssertEqual(state.historyIds.first, "ch5")
+        XCTAssertFalse(state.historyIds.contains("ch1"))
+        XCTAssertFalse(state.historyIds.contains("ch2"))
+    }
+
+    func test_setFavorite_truncatesOversizedIdentity() async throws {
+        let library = SwiftDataUserLibraryRepository(modelContext: context)
+        let longID = String(repeating: "a", count: 400)
+        let longName = String(repeating: "n", count: 400)
+        try await library.setFavorite(id: longID, name: longName, isFavorite: true)
+        let items = try context.fetch(FetchDescriptor<PersistedChannel>())
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.id.count, RemoteURLPolicy.maxPersistedIDLength)
+        XCTAssertEqual(items.first?.name.count, RemoteURLPolicy.maxPersistedNameLength)
+    }
 }
 
 #endif

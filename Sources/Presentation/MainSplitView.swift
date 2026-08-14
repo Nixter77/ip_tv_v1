@@ -216,6 +216,8 @@ private struct ChannelListColumn: View {
 
     /// Must live in the same view as `.focused` — crossing view boundaries breaks macOS focus.
     @FocusState private var isSearchFocused: Bool
+    /// Window the published catalog so a 20k-row List is not materialized at once.
+    @State private var listWindow = 400
 
     var body: some View {
         VStack(spacing: 0) {
@@ -252,18 +254,33 @@ private struct ChannelListColumn: View {
                 emptyState
                 Spacer()
             } else {
-                List(viewModel.filteredChannels, id: \.id, selection: $selectedChannel) { channel in
-                    ChannelRowView(
-                        channel: channel,
-                        isFavorite: viewModel.favoriteIds.contains(channel.id),
-                        onFavoriteToggle: {
-                            viewModel.toggleFavorite(channelId: channel.id)
-                        }
-                    )
-                    .tag(channel)
+                let rows = viewModel.filteredChannels
+                let visible = Array(rows.prefix(listWindow))
+                List(selection: $selectedChannel) {
+                    ForEach(visible, id: \.id) { channel in
+                        ChannelRowView(
+                            channel: channel,
+                            isFavorite: viewModel.favoriteIds.contains(channel.id),
+                            onFavoriteToggle: {
+                                viewModel.toggleFavorite(channelId: channel.id)
+                            }
+                        )
+                        .tag(channel)
+                    }
+                    if listWindow < rows.count {
+                        Text("Загрузить ещё…")
+                            .foregroundColor(.secondary)
+                            .onAppear { listWindow += 400 }
+                    }
                 }
                 .listStyle(PlainListStyle())
             }
+        }
+        .onChange(of: viewModel.searchQuery) { _, _ in
+            listWindow = 400
+        }
+        .onChange(of: viewModel.selectedTab) { _, _ in
+            listWindow = 400
         }
         .onChange(of: isSearchFocused) { _, focused in
             isSearchFieldActive = focused
@@ -447,7 +464,7 @@ struct ChannelRowView: View {
         self.channel = channel
         self.isFavorite = isFavorite
         self.onFavoriteToggle = onFavoriteToggle
-        self.logoURL = channel.logo.flatMap { URL(string: $0) }
+        self.logoURL = channel.safeLogoURL
         self.languagesLabel = channel.languages.joined(separator: ", ").uppercased()
     }
     

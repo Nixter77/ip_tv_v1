@@ -125,6 +125,15 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(vm.filteredChannels.count, 0)
     }
 
+    func test_searchQuery_isCapped() {
+        guard let vm = viewModel else {
+            XCTFail("viewModel missing")
+            return
+        }
+        vm.searchQuery = String(repeating: "a", count: RemoteURLPolicy.maxSearchQueryLength + 80)
+        XCTAssertEqual(vm.searchQuery.count, RemoteURLPolicy.maxSearchQueryLength)
+    }
+
     /// Тест: Метод play(channel:) корректно запускает воспроизведение в PlayerStateManager
     func test_playChannel() async throws {
         makeMockJSONData()

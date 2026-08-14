@@ -1,3 +1,32 @@
+# Security / quality pass (2026-08-15)
+
+Review: `tasks/code-review-1.md`. All critical findings fixed. `swift test` → **61 tests, 0 failures**.
+
+## Checklist
+- [x] C1 Logo SSRF / unbounded download — `RemoteURLPolicy` + `SafeHTTPClient` (redirect block, 512 KB cap, DNS fail-closed)
+- [x] C2 Shared `JSONDecoder` race — per-call decoder; decode off MainActor
+- [x] C3 Unbounded playlist body — `payloadTooLarge` + injectable `maxResponseBytes` (64 MB)
+- [x] C4 ETag / Last-Modified / Referer CTL injection — `sanitizedHTTPHeaderValue`
+- [x] History unbounded SwiftData growth — prune to `historyLimit`
+- [x] Search / persist identity caps
+- [x] HUD singleton cross-wiring main + detached windows
+- [x] URLCache 100/300 MB → 16/48 MB (thumbnails only)
+- [x] Player failed-item Task no longer tears down a newer zap
+- [x] Stale `filterEngine.setup` rejected via generation token
+- [x] Favorite persist serialized per id; rollback reloads the store
+- [x] `PlaybackClock` refuses NaN/Inf (`Int(nan)` trap)
+- [x] History `Dictionary` uniquing; skip-ratio poison catalog; cache dir `0700`
+
+## Deferred
+- Windowed “all channels” list (product)
+- Move `PlayerStateManager` out of Domain (layering)
+- Full circuit breaker (already out of scope)
+
+## Review
+Catalog treated as untrusted input. One URL policy for streams (LAN allowed) vs logos/referrers (public only). Size and redirect checks live in `SafeHTTPClient`, not at the last call site.
+
+---
+
 # Task: Clean Architecture refactor
 
 - [x] Domain: pure entities (no Decodable) + ports (Playlist, UserLibrary, StreamPlayer)

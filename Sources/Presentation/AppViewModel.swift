@@ -26,7 +26,13 @@ public enum SidebarTab: Codable, Hashable, Sendable, Equatable {
 @MainActor
 public final class AppViewModel: ObservableObject {
     @Published public private(set) var loadingState: AppLoadingState = .loading
-    @Published public var searchQuery: String = ""
+    @Published public var searchQuery: String = "" {
+        didSet {
+            if searchQuery.count > RemoteURLPolicy.maxSearchQueryLength {
+                searchQuery = String(searchQuery.prefix(RemoteURLPolicy.maxSearchQueryLength))
+            }
+        }
+    }
     @Published public var selectedTab: SidebarTab = .all
     @Published public private(set) var filteredChannels: [Channel] = []
     
@@ -56,6 +62,7 @@ public final class AppViewModel: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var lastReloadAt: Date?
     private let reloadCooldown: TimeInterval = 5
+    private var favoritePersistGeneration: [String: UInt] = [:]
 
     private var hasCatalog: Bool {
         if case .ready = loadingState { return true }
@@ -298,7 +305,7 @@ public final class AppViewModel: ObservableObject {
                 restrictedTo: historySet
             )
             guard !Task.isCancelled else { return }
-            let map = Dictionary(uniqueKeysWithValues: matched.map { ($0.id, $0) })
+            let map = Dictionary(matched.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
             self.filteredChannels = historyIds.compactMap { map[$0] }
             return
         }
@@ -354,13 +361,18 @@ public final class AppViewModel: ObservableObject {
             }
             return
         }
+        favoritePersistGeneration[id, default: 0] &+= 1
+        let generation = favoritePersistGeneration[id] ?? 1
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 try await self.userLibrary.setFavorite(id: id, name: name, isFavorite: isFavorite)
             } catch {
-                // Rollback optimistic UI so star state matches durable store
-                if isFavorite {
+                guard self.favoritePersistGeneration[id] == generation else { return }
+                // Reload store so rapid toggle + late failure cannot invert the star
+                if let state = try? await self.userLibrary.load() {
+                    self.favoriteIds = state.favoriteIds
+                } else if isFavorite {
                     self.favoriteIds.remove(id)
                 } else {
                     self.favoriteIds.insert(id)

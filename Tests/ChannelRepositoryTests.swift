@@ -7,8 +7,20 @@ import FoundationNetworking
 @testable import IPTVPlayer
 
 final class URLProtocolMock: URLProtocol {
-    static var mockData: [URL: (Data, URLResponse, Error?)] = [:]
-    
+    private static let lock = NSLock()
+    private static var storage: [URL: (Data, URLResponse, Error?)] = [:]
+    private static var last: URLRequest?
+
+    static var mockData: [URL: (Data, URLResponse, Error?)] {
+        get { lock.lock(); defer { lock.unlock() }; return storage }
+        set { lock.lock(); defer { lock.unlock() }; storage = newValue }
+    }
+
+    static var lastRequest: URLRequest? {
+        get { lock.lock(); defer { lock.unlock() }; return last }
+        set { lock.lock(); defer { lock.unlock() }; last = newValue }
+    }
+
     override class func canInit(with request: URLRequest) -> Bool {
         return true
     }
@@ -18,12 +30,16 @@ final class URLProtocolMock: URLProtocol {
     }
     
     override func startLoading() {
-        if let url = request.url, let (data, response, error) = URLProtocolMock.mockData[url] {
+        Self.lock.lock()
+        Self.last = request
+        let snapshot = request.url.flatMap { Self.storage[$0] }
+        Self.lock.unlock()
+        if let (data, response, error) = snapshot {
             if let error = error {
                 client?.urlProtocol(self, didFailWithError: error)
             } else {
-                client?.urlProtocol(self, didLoad: data)
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
             }
         }
         client?.urlProtocolDidFinishLoading(self)
@@ -44,12 +60,14 @@ final class ChannelRepositoryTests: XCTestCase {
         // diskCache: nil — изоляция тестов от дискового кэша и 304/stale fallback
         repository = IPTVRepository(session: session, diskCache: nil)
         URLProtocolMock.mockData.removeAll()
+        URLProtocolMock.lastRequest = nil
     }
 
     override func tearDown() {
         session = nil
         repository = nil
         URLProtocolMock.mockData.removeAll()
+        URLProtocolMock.lastRequest = nil
         super.tearDown()
     }
 

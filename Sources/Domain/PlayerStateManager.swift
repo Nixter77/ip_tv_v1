@@ -129,13 +129,9 @@ public final class PlayerStateManager: NSObject, StreamPlayer {
         }
         
         var validReferrer: String?
-        if let referrer = stream.httpReferrer,
-           !referrer.contains("\r"),
-           !referrer.contains("\n"),
-           let referrerURL = URL(string: referrer),
-           let scheme = referrerURL.scheme?.lowercased(),
-           scheme == "http" || scheme == "https" {
-            validReferrer = referrer
+        if let referrer = RemoteURLPolicy.sanitizedHTTPHeaderValue(stream.httpReferrer),
+           let referrerURL = RemoteURLPolicy.validatedURL(from: referrer, kind: .remoteAsset) {
+            validReferrer = referrerURL.absoluteString
         }
 
         let playerItem: AVPlayerItem
@@ -227,7 +223,11 @@ public final class PlayerStateManager: NSObject, StreamPlayer {
             let rawError = item.error?.localizedDescription ?? "Неизвестная ошибка сети"
             let errorDescription = Stream.maskURLs(in: rawError)
             Task { @MainActor [weak self] in
-                await self?.handleStreamFailure(stream: stream, error: errorDescription)
+                guard let self else { return }
+                // Re-check after hop so a zap cannot tear down the new item
+                guard case .loading(let current) = self.state, current == stream,
+                      self.avPlayer.currentItem === item else { return }
+                await self.handleStreamFailure(stream: stream, error: errorDescription)
             }
             
         case .unknown:

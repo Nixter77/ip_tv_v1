@@ -36,11 +36,17 @@ public final class SwiftDataUserLibraryRepository: UserLibraryRepository {
     }
 
     public func setFavorite(id: String, name: String, isFavorite: Bool) async throws {
+        let id = Self.sanitizeID(id)
+        guard !id.isEmpty else { return }
+        let name = Self.sanitizeName(name)
         let descriptor = FetchDescriptor<PersistedChannel>(predicate: #Predicate { $0.id == id })
         let items = try modelContext.fetch(descriptor)
 
         if let existing = items.first {
             existing.isFavorite = isFavorite
+            if !existing.name.isEmpty || !name.isEmpty {
+                existing.name = name.isEmpty ? existing.name : name
+            }
             if !isFavorite && existing.lastViewedAt == nil {
                 modelContext.delete(existing)
             }
@@ -51,17 +57,46 @@ public final class SwiftDataUserLibraryRepository: UserLibraryRepository {
     }
 
     public func recordView(id: String, name: String) async throws {
+        let id = Self.sanitizeID(id)
+        guard !id.isEmpty else { return }
+        let name = Self.sanitizeName(name)
         let descriptor = FetchDescriptor<PersistedChannel>(predicate: #Predicate { $0.id == id })
         let items = try modelContext.fetch(descriptor)
 
         if let existing = items.first {
             existing.lastViewedAt = Date()
+            if !name.isEmpty {
+                existing.name = name
+            }
         } else {
             modelContext.insert(
                 PersistedChannel(id: id, name: name, isFavorite: false, lastViewedAt: Date())
             )
         }
+        try pruneHistory()
         try modelContext.save()
+    }
+
+    private func pruneHistory() throws {
+        let descriptor = FetchDescriptor<PersistedChannel>()
+        let items = try modelContext.fetch(descriptor)
+        let history = items.filter { $0.lastViewedAt != nil }
+            .sorted { ($0.lastViewedAt ?? .distantPast) > ($1.lastViewedAt ?? .distantPast) }
+        guard history.count > historyLimit else { return }
+        for extra in history.dropFirst(historyLimit) {
+            extra.lastViewedAt = nil
+            if !extra.isFavorite {
+                modelContext.delete(extra)
+            }
+        }
+    }
+
+    private static func sanitizeID(_ id: String) -> String {
+        String(id.trimmingCharacters(in: .whitespacesAndNewlines).prefix(RemoteURLPolicy.maxPersistedIDLength))
+    }
+
+    private static func sanitizeName(_ name: String) -> String {
+        String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(RemoteURLPolicy.maxPersistedNameLength))
     }
 }
 #endif

@@ -2,7 +2,7 @@
 // Transport models for iptv-org JSON — mapped to Domain entities.
 import Foundation
 
-struct ChannelDTO: Decodable {
+struct ChannelDTO: Decodable, Sendable {
     let id: String
     let name: String
     let country: String?
@@ -18,13 +18,13 @@ struct ChannelDTO: Decodable {
             country: country,
             languages: languages ?? [],
             categories: categories ?? [],
-            logo: logo,
-            website: website
+            logo: RemoteURLPolicy.validatedURL(from: logo, kind: .remoteAsset) != nil ? logo : nil,
+            website: RemoteURLPolicy.validatedURL(from: website, kind: .remoteAsset) != nil ? website : nil
         )
     }
 }
 
-struct StreamDTO: Decodable {
+struct StreamDTO: Decodable, Sendable {
     let channel: String
     let url: String
     let status: String?
@@ -45,12 +45,12 @@ struct StreamDTO: Decodable {
             urlString: url,
             status: status,
             timeshift: timeshift,
-            httpReferrer: httpReferrer
+            httpReferrer: RemoteURLPolicy.sanitizedHTTPHeaderValue(httpReferrer)
         )
     }
 }
 
-struct CategoryDTO: Decodable {
+struct CategoryDTO: Decodable, Sendable {
     let name: String
 
     func toDomain() -> Category {
@@ -58,7 +58,7 @@ struct CategoryDTO: Decodable {
     }
 }
 
-struct CountryDTO: Decodable {
+struct CountryDTO: Decodable, Sendable {
     let code: String
     let name: String
     let languages: [String]?
@@ -69,7 +69,7 @@ struct CountryDTO: Decodable {
     }
 }
 
-struct LanguageDTO: Decodable {
+struct LanguageDTO: Decodable, Sendable {
     let code: String
     let name: String
 

@@ -100,4 +100,214 @@ final class SecurityTests: XCTestCase {
         XCTAssertFalse(masked.contains("secret"))
         XCTAssertFalse(masked.contains("password"))
     }
+
+    // MARK: - Stream / media URL policy
+
+    func test_stream_url_rejectsNonHTTPSchemes() {
+        XCTAssertNil(makeStream("file:///etc/passwd").url)
+        XCTAssertNil(makeStream("javascript:alert(1)").url)
+        XCTAssertNil(makeStream("data:text/plain,hi").url)
+        XCTAssertNil(makeStream("ftp://example.com/live.m3u8").url)
+    }
+
+    func test_stream_url_allowsLANForLocalIPTV() {
+        XCTAssertNotNil(makeStream("http://192.168.1.10:8080/live.m3u8").url)
+        XCTAssertNotNil(makeStream("http://127.0.0.1:8888/stream").url)
+    }
+
+    func test_channel_safeLogoURL_blocksSSRFTargets() {
+        XCTAssertNil(channel(logo: "file:///etc/passwd").safeLogoURL)
+        XCTAssertNil(channel(logo: "http://127.0.0.1/admin").safeLogoURL)
+        XCTAssertNil(channel(logo: "http://localhost/logo.png").safeLogoURL)
+        XCTAssertNil(channel(logo: "http://10.0.0.5/logo.png").safeLogoURL)
+        XCTAssertNil(channel(logo: "http://192.168.0.1/logo.png").safeLogoURL)
+        XCTAssertNil(channel(logo: "http://169.254.169.254/latest/meta-data").safeLogoURL)
+        XCTAssertNil(channel(logo: "http://[::1]/logo.png").safeLogoURL)
+        XCTAssertNil(channel(logo: "https://user:pass@cdn.example/logo.png").safeLogoURL)
+        XCTAssertNil(channel(logo: "https://example.com/logo.png\r\nX-Injected: 1").safeLogoURL)
+        XCTAssertNil(channel(logo: "https://example.com/logo.png%0d%0aX-Injected:%201").safeLogoURL)
+        XCTAssertNotNil(channel(logo: "https://cdn.example.com/logo.png").safeLogoURL)
+    }
+
+    func test_remoteURLPolicy_blocksDecimalLoopback() {
+        XCTAssertTrue(RemoteURLPolicy.isRestrictedHost("2130706433"))
+        XCTAssertTrue(RemoteURLPolicy.isRestrictedHost("127.1"))
+        XCTAssertFalse(RemoteURLPolicy.isRestrictedHost("cdn.example.com"))
+        XCTAssertFalse(RemoteURLPolicy.shouldFollowRedirect(
+            to: URL(string: "http://127.0.0.1/secret")!,
+            kind: .remoteAsset
+        ))
+        XCTAssertTrue(RemoteURLPolicy.shouldFollowRedirect(
+            to: URL(string: "https://cdn.example.com/logo.png")!,
+            kind: .remoteAsset
+        ))
+    }
+
+    func test_safeHTTPClient_rejectsBlockedURLWithoutFetch() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolMock.self]
+        let client = SafeHTTPClient(configuration: config)
+        URLProtocolMock.mockData.removeAll()
+
+        do {
+            _ = try await client.data(
+                for: URL(string: "http://127.0.0.1/logo.png")!,
+                maxBytes: 1024,
+                kind: .remoteAsset
+            )
+            XCTFail("loopback logo must be blocked")
+        } catch let error as SafeHTTPError {
+            XCTAssertEqual(error, .blockedURL)
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+    }
+
+    func test_safeHTTPClient_rejectsOversizedBody() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolMock.self]
+        let client = SafeHTTPClient(configuration: config)
+        let url = URL(string: "https://cdn.example.com/logo.png")!
+        let oversized = Data(repeating: 0xFF, count: 8_192)
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        URLProtocolMock.mockData[url] = (oversized, response, nil)
+
+        do {
+            _ = try await client.data(for: url, maxBytes: 1_024, kind: .remoteAsset)
+            XCTFail("oversized body must be rejected")
+        } catch let error as SafeHTTPError {
+            XCTAssertEqual(error, .tooLarge)
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+        URLProtocolMock.mockData.removeAll()
+    }
+
+    func test_sanitizedHTTPHeaderValue_rejectsCTL() {
+        XCTAssertNil(RemoteURLPolicy.sanitizedHTTPHeaderValue("abc\r\nAuthorization: Bearer x"))
+        XCTAssertNil(RemoteURLPolicy.sanitizedHTTPHeaderValue("abc\nX-Injected: 1"))
+        XCTAssertNil(RemoteURLPolicy.sanitizedHTTPHeaderValue("abc\0tail"))
+        XCTAssertEqual(RemoteURLPolicy.sanitizedHTTPHeaderValue("  \"abc123\"  "), "\"abc123\"")
+        XCTAssertNil(RemoteURLPolicy.sanitizedHTTPHeaderValue("   "))
+    }
+
+    func test_repository_dropsPoisonedETagOnRefresh() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolMock.self]
+        let session = URLSession(configuration: config)
+        let cacheDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iptv-etag-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: cacheDir) }
+
+        let cache = PlaylistDiskCache(directory: cacheDir, ttl: 6 * 3600)
+        let repo = IPTVRepository(session: session, diskCache: cache, maxAttempts: 1)
+        let url = URL(string: "https://iptv-org.github.io/api/channels.json")!
+        let json = Data(#"[{"id":"cnn.us","name":"CNN"}]"#.utf8)
+        URLProtocolMock.mockData[url] = (
+            json,
+            HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: [
+                    "ETag": "\"abc\"\r\nAuthorization: Bearer stolen",
+                    "Last-Modified": "Wed, 01 Jan 2020 00:00:00 GMT\r\nX-Injected: 1"
+                ]
+            )!,
+            nil
+        )
+        _ = try await repo.fetchChannels(options: .forceNetwork)
+
+        URLProtocolMock.lastRequest = nil
+        URLProtocolMock.mockData[url] = (
+            json,
+            HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["ETag": "\"ok\""])!,
+            nil
+        )
+        _ = try await repo.fetchChannels(options: .forceNetwork)
+
+        XCTAssertNil(URLProtocolMock.lastRequest?.value(forHTTPHeaderField: "If-None-Match"))
+        XCTAssertNil(URLProtocolMock.lastRequest?.value(forHTTPHeaderField: "If-Modified-Since"))
+        URLProtocolMock.mockData.removeAll()
+        URLProtocolMock.lastRequest = nil
+    }
+
+    func test_repository_forwardsSanitizedETag() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolMock.self]
+        let session = URLSession(configuration: config)
+        let cacheDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iptv-etag-ok-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: cacheDir) }
+
+        let cache = PlaylistDiskCache(directory: cacheDir, ttl: 6 * 3600)
+        let repo = IPTVRepository(session: session, diskCache: cache, maxAttempts: 1)
+        let url = URL(string: "https://iptv-org.github.io/api/channels.json")!
+        let json = Data(#"[{"id":"cnn.us","name":"CNN"}]"#.utf8)
+        URLProtocolMock.mockData[url] = (
+            json,
+            HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["ETag": "\"abc123\""])!,
+            nil
+        )
+        _ = try await repo.fetchChannels(options: .forceNetwork)
+
+        URLProtocolMock.lastRequest = nil
+        _ = try await repo.fetchChannels(options: .forceNetwork)
+        XCTAssertEqual(URLProtocolMock.lastRequest?.value(forHTTPHeaderField: "If-None-Match"), "\"abc123\"")
+        URLProtocolMock.mockData.removeAll()
+        URLProtocolMock.lastRequest = nil
+    }
+
+    func test_repository_rejectsOversizedPlaylistPayload() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolMock.self]
+        let session = URLSession(configuration: config)
+        let repo = IPTVRepository(session: session, diskCache: nil, maxAttempts: 1, maxResponseBytes: 32)
+        let url = URL(string: "https://iptv-org.github.io/api/channels.json")!
+        let body = Data(repeating: 0x41, count: 64)
+        URLProtocolMock.mockData[url] = (
+            body,
+            HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+            nil
+        )
+
+        do {
+            _ = try await repo.fetchChannels()
+            XCTFail("oversized playlist must throw")
+        } catch let error as PlaylistFetchError {
+            if case .payloadTooLarge(_, let count) = error {
+                XCTAssertEqual(count, 64)
+            } else {
+                XCTFail("expected payloadTooLarge, got \(error)")
+            }
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+        URLProtocolMock.mockData.removeAll()
+    }
+
+    func test_playbackClock_nanDoesNotTrap() {
+        XCTAssertEqual(PlaybackClock.format(.nan), "0:00")
+        XCTAssertEqual(PlaybackClock.format(.infinity), "0:00")
+        XCTAssertEqual(PlaybackClock.format(-3), "0:00")
+        XCTAssertEqual(PlaybackClock.format(65), "1:05")
+    }
+
+    private func makeStream(_ url: String) -> IPTVPlayer.Stream {
+        IPTVPlayer.Stream(channel: "test", urlString: url, status: nil, timeshift: nil, httpReferrer: nil)
+    }
+
+    private func channel(logo: String) -> Channel {
+        Channel(
+            id: "t",
+            name: "T",
+            country: nil,
+            languages: [],
+            categories: [],
+            logo: logo,
+            website: nil
+        )
+    }
 }

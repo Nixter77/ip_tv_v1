@@ -29,6 +29,12 @@ public struct Channel: Identifiable, Equatable, Hashable, Sendable {
         self.logo = logo
         self.website = website
     }
+
+    /// Logo URL safe to fetch (http(s) + public host). Nil for file/localhost/RFC1918/credentials.
+    public var safeLogoURL: URL? {
+        guard let logo else { return nil }
+        return RemoteURLPolicy.validatedURL(from: logo, kind: .remoteAsset)
+    }
 }
 
 /// Стриминговый поток для канала
@@ -39,12 +45,6 @@ public struct Stream: Equatable, Hashable, Sendable {
     public let timeshift: Int?
     public let httpReferrer: String?
 
-    private static let iptvUrlAllowed: CharacterSet = {
-        var allowed = CharacterSet.urlQueryAllowed
-        allowed.insert("#")
-        return allowed
-    }()
-
     public init(channel: String, urlString: String, status: String?, timeshift: Int?, httpReferrer: String?) {
         self.channel = channel
         self.urlString = urlString
@@ -54,18 +54,7 @@ public struct Stream: Equatable, Hashable, Sendable {
     }
 
     public var url: URL? {
-        if let url = URL(string: urlString),
-           let scheme = url.scheme?.lowercased(),
-           scheme == "http" || scheme == "https" {
-            return url
-        }
-        guard let encodedString = urlString.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed),
-              let url = URL(string: encodedString),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else {
-            return nil
-        }
-        return url
+        RemoteURLPolicy.validatedURL(from: urlString, kind: .mediaStream)
     }
 
     public var maskedUrlString: String {
@@ -74,7 +63,7 @@ public struct Stream: Equatable, Hashable, Sendable {
 
     public static func mask(_ urlString: String) -> String {
         var components = URLComponents(string: urlString)
-        if components == nil, let encoded = urlString.addingPercentEncoding(withAllowedCharacters: Self.iptvUrlAllowed) {
+        if components == nil, let encoded = urlString.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed.union(CharacterSet(charactersIn: "#"))) {
             components = URLComponents(string: encoded)
         }
 

@@ -10,9 +10,10 @@ struct IPTVApp: App {
     @StateObject private var commands: AppCommandCenter
     
     init() {
-        // URLCache только для логотипов (API-плейлист — отдельный PlaylistDiskCache)
-        let memoryCapacity = 100 * 1024 * 1024 // 100 MB
-        let diskCapacity = 300 * 1024 * 1024 // 300 MB
+        // URLCache только для логотипов (API-плейлист — отдельный PlaylistDiskCache).
+        // Logo bodies are capped at 512 KB; 16/48 MB is enough for visible rows.
+        let memoryCapacity = 16 * 1024 * 1024
+        let diskCapacity = 48 * 1024 * 1024
         let cache = URLCache(memoryCapacity: memoryCapacity, diskCapacity: diskCapacity, directory: nil)
         URLCache.shared = cache
         

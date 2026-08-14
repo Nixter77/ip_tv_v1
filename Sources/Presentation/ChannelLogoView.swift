@@ -45,24 +45,43 @@ struct ChannelLogoView: View {
 
     private func loadImage() async {
         image = nil
-        guard let url else { return }
+        guard let url,
+              RemoteURLPolicy.validatedURL(from: url.absoluteString, kind: .remoteAsset) != nil else {
+            return
+        }
 
-        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 30)
+        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
+        let maxBytes = RemoteURLPolicy.maxLogoBytes
 
+        // Cached bytes are already local — skip DNS so offline placeholders still resolve.
         if let cached = URLCache.shared.cachedResponse(for: request),
+           cached.data.count <= maxBytes,
            let downsampled = Self.downsample(data: cached.data, maxPixelSize: maxPixelSize) {
             image = downsampled
             return
         }
 
+        if let host = url.host, !RemoteURLPolicy.isLiteralIPAddress(host) {
+            let publicDNS = await RemoteURLPolicy.resolvesOnlyToPublicAddresses(host: host)
+            guard publicDNS else { return }
+        }
+
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                let cached = CachedURLResponse(response: response, data: data)
-                URLCache.shared.storeCachedResponse(cached, for: request)
+            let (data, response) = try await SafeHTTPClient.shared.data(
+                for: url,
+                maxBytes: maxBytes,
+                kind: .remoteAsset
+            )
+            guard data.count <= maxBytes else { return }
+            guard let downsampled = Self.downsample(data: data, maxPixelSize: maxPixelSize) else {
+                return
             }
-            if let downsampled = Self.downsample(data: data, maxPixelSize: maxPixelSize) {
-                image = downsampled
+            image = downsampled
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                URLCache.shared.storeCachedResponse(
+                    CachedURLResponse(response: response, data: data),
+                    for: request
+                )
             }
         } catch {
             // placeholder остаётся

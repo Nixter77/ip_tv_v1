@@ -1,7 +1,8 @@
-#if canImport(SwiftUI) && canImport(AVFoundation)
+#if canImport(SwiftUI) && canImport(AVFoundation) && canImport(AppKit)
 // Sources/Presentation/QuickTimeHUDPanel.swift
 import SwiftUI
 import AVFoundation
+import AppKit
 
 // MARK: - Auto-Hide Modifier
 
@@ -11,7 +12,7 @@ struct AutoHideHUDModifier: ViewModifier {
     let hideDelay: TimeInterval
     @Binding var isVisible: Bool
 
-    @State private var trackingTag: NSView.TrackingRectTag?
+    @StateObject private var mouse = HUDWindowMouseMonitor()
     @State private var hideTimer: Timer?
     @State private var isCursorHidden = false
 
@@ -19,26 +20,14 @@ struct AutoHideHUDModifier: ViewModifier {
         content
             .opacity(isVisible ? 1 : 0)
             .animation(.easeInOut(duration: 0.25), value: isVisible)
-            .background(HostingWindowAccessor { window in
-                guard let contentView = window.contentView else { return }
-                if let oldTag = trackingTag {
-                    contentView.removeTrackingRect(oldTag)
-                }
-                trackingTag = contentView.addTrackingRect(
-                    contentView.bounds,
-                    owner: Coordinator.shared,
-                    userData: nil,
-                    assumeInside: false
-                )
-                Coordinator.shared.onMouseMoved = { scheduleShow() }
-                Coordinator.shared.onMouseExited = { scheduleHide() }
+            .background(WindowAccessor { window in
+                mouse.attach(to: window, onMoved: scheduleShow)
             })
             .onAppear { scheduleShow() }
             .onDisappear {
                 hideTimer?.invalidate()
                 if isCursorHidden { NSCursor.unhide() }
-                Coordinator.shared.onMouseMoved = nil
-                Coordinator.shared.onMouseExited = nil
+                mouse.stop()
             }
     }
 
@@ -60,41 +49,39 @@ struct AutoHideHUDModifier: ViewModifier {
     }
 }
 
-private final class Coordinator: NSObject {
-    static let shared = Coordinator()
-    var onMouseMoved: (() -> Void)?
-    var onMouseExited: (() -> Void)?
+/// One monitor per HUD instance so main + detached windows do not clobber each other.
+private final class HUDWindowMouseMonitor: ObservableObject {
     private var monitor: Any?
+    private weak var window: NSWindow?
+    private var onMoved: (() -> Void)?
 
-    override init() {
-        super.init()
+    func attach(to window: NSWindow, onMoved: @escaping () -> Void) {
+        self.window = window
+        self.onMoved = onMoved
+        guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .leftMouseDown, .rightMouseDown]) { [weak self] event in
-            self?.onMouseMoved?()
+            guard let self, let tracked = self.window, event.window == tracked else {
+                return event
+            }
+            self.onMoved?()
             return event
         }
     }
 
-    deinit {
-        if let monitor = monitor { NSEvent.removeMonitor(monitor) }
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        onMoved = nil
+        window = nil
     }
+
+    deinit { stop() }
 }
 
 extension View {
     func autoHideHUD(isVisible: Binding<Bool>, hideDelay: TimeInterval = 3.0) -> some View {
         modifier(AutoHideHUDModifier(hideDelay: hideDelay, isVisible: isVisible))
     }
-}
-
-private struct HostingWindowAccessor: NSViewRepresentable {
-    let callback: (NSWindow) -> Void
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            if let window = view.window { callback(window) }
-        }
-        return view
-    }
-    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 // MARK: - QuickTime HUD Panel
@@ -303,21 +290,19 @@ public struct QuickTimeHUDPanel: View {
             guard !isSeeking else { return }
 
             let seconds = time.seconds
+            guard seconds.isFinite else { return }
             if let item = player.currentItem {
                 let dur = item.duration.seconds
-                let live = !(dur.isFinite && !dur.isNaN && dur > 0)
+                let live = !(dur.isFinite && dur > 0)
                 if live != isLiveStream {
                     isLiveStream = live
                 }
                 if !live {
                     duration = dur
                     currentTime = seconds
-                } else {
-                    // Live: update clock at most every 2s to cut SwiftUI invalidations
-                    if seconds - lastLiveUIUpdate >= 2.0 {
-                        lastLiveUIUpdate = seconds
-                        currentTime = seconds
-                    }
+                } else if !lastLiveUIUpdate.isFinite || seconds - lastLiveUIUpdate >= 2.0 {
+                    lastLiveUIUpdate = seconds
+                    currentTime = seconds
                 }
             } else {
                 currentTime = seconds
@@ -335,6 +320,13 @@ public struct QuickTimeHUDPanel: View {
     }
 
     private func formatTime(_ seconds: Double) -> String {
+        PlaybackClock.format(seconds)
+    }
+}
+
+public enum PlaybackClock {
+    public static func format(_ seconds: Double) -> String {
+        guard seconds.isFinite else { return "0:00" }
         let total = Int(max(0, seconds))
         let h = total / 3600
         let m = (total % 3600) / 60

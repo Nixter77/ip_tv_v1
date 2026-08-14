@@ -11,7 +11,7 @@ private extension String {
 /// Быстрый движок фильтрации по 50k каналам (оборудован для Concurrency)
 public protocol ChannelFilterEngineProtocol: Sendable {
     /// Инициализация движка набором каналов и потоков
-    func setup(channels: [Channel], streams: [Stream]) async
+    func setup(channels: [Channel], streams: [Stream], generation: UInt64) async
     
     /// Фильтрация с использованием предвычисленных индексов (< 50мс)
     /// - Parameter restrictedTo: Опциональное множество ID (избранное и т.п.) — фильтр применяется только внутри него
@@ -31,6 +31,10 @@ public protocol ChannelFilterEngineProtocol: Sendable {
 }
 
 public extension ChannelFilterEngineProtocol {
+    func setup(channels: [Channel], streams: [Stream]) async {
+        await setup(channels: channels, streams: streams, generation: 0)
+    }
+
     /// Удобный overload без ограничения по ID
     func filter(
         query: String?,
@@ -75,11 +79,13 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
 
     // Предварительно отсортированный список всех активных каналов
     private var allChannelsSorted: [Channel] = []
+    /// Newer catalog loads win; stale cancelled setups do not replace the index.
+    private var appliedGeneration: UInt64 = 0
 
     public init() {}
 
     /// Инициализация движка: индексы собираются в локальные структуры и атомарно подменяются в конце
-    public func setup(channels: [Channel], streams: [Stream]) async {
+    public func setup(channels: [Channel], streams: [Stream], generation: UInt64 = 0) async {
         var newChannels: [String: Channel] = [:]
         var newActiveStreams: [String: [Stream]] = [:]
         var newByCategory: [String: Set<String>] = [:]
@@ -125,10 +131,17 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         
         // Сортируем токены один раз; после построения tokenSets словарь tokenIndex не храним
         let newSortedTokens = tokenIndex.keys.sorted()
-        let newTokenSets = newSortedTokens.map { tokenIndex[$0]! }
+        let newTokenSets = newSortedTokens.map { tokenIndex[$0] ?? [] }
         let newAllSorted = newChannels.values.sorted { $0.name < $1.name }
 
+        if generation > 0, generation < appliedGeneration {
+            return
+        }
+
         // Атомарная подмена состояния актора
+        if generation > 0 {
+            appliedGeneration = generation
+        }
         self.channels = newChannels
         self.activeStreams = newActiveStreams
         self.channelsByCategory = newByCategory
@@ -171,6 +184,17 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         }
 
         return start..<low
+    }
+
+    /// Intersect `resultSet` with `other`. Returns true when the result is empty.
+    private func intersect(_ resultSet: inout Set<String>?, with other: Set<String>) -> Bool {
+        if var current = resultSet {
+            current.formIntersection(other)
+            resultSet = current
+        } else {
+            resultSet = other
+        }
+        return resultSet?.isEmpty == true
     }
 
     /// Материализация множества ID в отсортированный список каналов.
@@ -246,40 +270,14 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
             return []
         }
         
-        // 1. Фильтр по категории
         if let category = category, !category.isEmpty {
-            let categorySet = channelsByCategory[category.lowercased()] ?? []
-            if var current = resultSet {
-                current.formIntersection(categorySet)
-                resultSet = current
-            } else {
-                resultSet = categorySet
-            }
-            if resultSet?.isEmpty == true { return [] }
+            if intersect(&resultSet, with: channelsByCategory[category.lowercased()] ?? []) { return [] }
         }
-        
-        // 2. Фильтр по стране
         if let country = country, !country.isEmpty {
-            let countrySet = channelsByCountry[country.uppercased()] ?? []
-            if var current = resultSet {
-                current.formIntersection(countrySet)
-                resultSet = current
-            } else {
-                resultSet = countrySet
-            }
-            if resultSet?.isEmpty == true { return [] }
+            if intersect(&resultSet, with: channelsByCountry[country.uppercased()] ?? []) { return [] }
         }
-        
-        // 3. Фильтр по языку
         if let language = language, !language.isEmpty {
-            let langSet = channelsByLanguage[language.lowercased()] ?? []
-            if var current = resultSet {
-                current.formIntersection(langSet)
-                resultSet = current
-            } else {
-                resultSet = langSet
-            }
-            if resultSet?.isEmpty == true { return [] }
+            if intersect(&resultSet, with: channelsByLanguage[language.lowercased()] ?? []) { return [] }
         }
         
         // 4. Текстовый поиск: пересечение токенов; universe сужает union на коротких префиксах
@@ -299,27 +297,14 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                 let matchesForToken = channelIdsMatchingToken(token, within: universe)
 
                 if matchesForToken.isEmpty { return [] }
-                
-                if var current = tokenIntersection {
-                    current.formIntersection(matchesForToken)
-                    tokenIntersection = current
-                    if tokenIntersection?.isEmpty == true { return [] }
-                } else {
-                    tokenIntersection = matchesForToken
-                }
+                if intersect(&tokenIntersection, with: matchesForToken) { return [] }
             }
             
             if let searchSet = tokenIntersection {
-                if var current = resultSet {
-                    current.formIntersection(searchSet)
-                    resultSet = current
-                } else {
-                    resultSet = searchSet
-                }
+                if intersect(&resultSet, with: searchSet) { return [] }
             } else {
                 return []
             }
-            if resultSet?.isEmpty == true { return [] }
         }
         
         guard let finalIds = resultSet else {

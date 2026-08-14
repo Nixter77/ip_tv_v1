@@ -11,6 +11,7 @@ public enum PlaylistFetchError: Error, LocalizedError, Sendable {
     case emptyPayload(endpoint: String, byteCount: Int)
     case decodingFailed(endpoint: String, underlying: String)
     case noData
+    case payloadTooLarge(endpoint: String, byteCount: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -24,6 +25,8 @@ public enum PlaylistFetchError: Error, LocalizedError, Sendable {
             return "Не удалось разобрать данные плейлиста"
         case .noData:
             return "Нет данных плейлиста"
+        case .payloadTooLarge(_, let byteCount):
+            return "Ответ плейлиста слишком большой (\(byteCount) байт)"
         }
     }
 
@@ -44,6 +47,8 @@ public enum PlaylistFetchError: Error, LocalizedError, Sendable {
             return "Внутренняя ошибка адреса плейлиста."
         case .noData:
             return "Нет данных плейлиста."
+        case .payloadTooLarge:
+            return "Сервер вернул слишком большой плейлист."
         }
     }
 }
@@ -90,6 +95,14 @@ public struct PlaylistDiskCache: Sendable {
 
     fileprivate func ensureDirectory() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var dir = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? dir.setResourceValues(values)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: directory.path
+        )
     }
 
     fileprivate func dataURL(for key: String) -> URL {
@@ -119,8 +132,8 @@ public struct PlaylistDiskCache: Sendable {
         try data.write(to: dataURL(for: key), options: .atomic)
         let meta = PlaylistCacheMeta(
             fetchedAt: Date(),
-            etag: etag,
-            lastModified: lastModified,
+            etag: RemoteURLPolicy.sanitizedHTTPHeaderValue(etag),
+            lastModified: RemoteURLPolicy.sanitizedHTTPHeaderValue(lastModified),
             contentLength: data.count
         )
         let metaData = try JSONEncoder().encode(meta)
@@ -136,9 +149,10 @@ public struct PlaylistDiskCache: Sendable {
 /// Data adapter: iptv-org HTTP + disk cache → Domain entities (via DTOs).
 public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
     private let session: URLSession
-    private let decoder = JSONDecoder()
     private let diskCache: PlaylistDiskCache?
     private let maxAttempts: Int
+    private let maxResponseBytes: Int
+    private let cacheLock = NSLock()
 
     /// Сессия по умолчанию с жёсткими таймаутами (не .shared)
     public static func makeDefaultSession() -> URLSession {
@@ -172,14 +186,31 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
     public init(
         session: URLSession = IPTVRepository.makeDefaultSession(),
         diskCache: PlaylistDiskCache? = .applicationDefault,
-        maxAttempts: Int = 3
+        maxAttempts: Int = 3,
+        maxResponseBytes: Int = RemoteURLPolicy.maxPlaylistBytes
     ) {
         self.session = session
         self.diskCache = diskCache
         self.maxAttempts = max(1, maxAttempts)
+        self.maxResponseBytes = max(1, maxResponseBytes)
+    }
+
+    private func withCacheLock<T>(_ body: (PlaylistDiskCache) throws -> T) rethrows -> T? {
+        guard let diskCache else { return nil }
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return try body(diskCache)
+    }
+
+    private func rejectIfTooLarge(_ data: Data, endpoint: Endpoint) throws {
+        if data.count > maxResponseBytes {
+            throw PlaylistFetchError.payloadTooLarge(endpoint: endpoint.rawValue, byteCount: data.count)
+        }
     }
 
     private func decodeArray<T: Decodable>(from data: Data, endpoint: Endpoint) throws -> [T] {
+        try rejectIfTooLarge(data, endpoint: endpoint)
+        let decoder = JSONDecoder()
         do {
             let items = try decoder.decode([T].self, from: data)
             try validatePayload(items, data: data, endpoint: endpoint)
@@ -193,11 +224,17 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                 let skipped = safeElements.count - items.count
                 if skipped > 0 {
                     let ratio = Double(skipped) / Double(max(safeElements.count, 1))
-                    if ratio > 0.3 {
-                        #if DEBUG
-                        print("Playlist \(endpoint.rawValue): skipped \(skipped)/\(safeElements.count) items (\(Int(ratio * 100))%)")
-                        #endif
+                    if ratio > 0.3, endpoint.rejectsEmptyLargePayload, safeElements.count >= 20 {
+                        throw PlaylistFetchError.decodingFailed(
+                            endpoint: endpoint.rawValue,
+                            underlying: "skipped \(skipped)/\(safeElements.count) items"
+                        )
                     }
+                    #if DEBUG
+                    if ratio > 0.3 {
+                        print("Playlist \(endpoint.rawValue): skipped \(skipped)/\(safeElements.count) items (\(Int(ratio * 100))%)")
+                    }
+                    #endif
                 }
                 try validatePayload(items, data: data, endpoint: endpoint)
                 return items
@@ -242,6 +279,7 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
             try Task.checkCancellation()
             do {
                 let (data, response) = try await session.data(for: request)
+                try rejectIfTooLarge(data, endpoint: endpoint)
                 if let http = response as? HTTPURLResponse {
                     if isRetriableHTTP(http.statusCode), attempt < maxAttempts - 1 {
                         try await Task.sleep(nanoseconds: delayNs + UInt64.random(in: 0...50_000_000))
@@ -280,22 +318,41 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
         throw lastError
     }
 
-    private func fetchAndDecodeSafeArray<T: Decodable>(
+    /// Disk I/O + JSON decode hop off the caller's executor (Swift 5.9 inherits MainActor).
+    private func decodeArrayOffMain<T: Decodable & Sendable>(
+        from data: Data,
+        endpoint: Endpoint
+    ) async throws -> [T] {
+        try await Task.detached(priority: .userInitiated) {
+            try self.decodeArray(from: data, endpoint: endpoint)
+        }.value
+    }
+
+    private func loadCacheSnapshot(key: String) async -> (meta: PlaylistCacheMeta?, data: Data?) {
+        await Task.detached(priority: .utility) {
+            let meta = self.withCacheLock { $0.loadMeta(for: key) } ?? nil
+            let data = self.withCacheLock { $0.loadData(for: key) } ?? nil
+            return (meta, data)
+        }.value
+    }
+
+    private func fetchAndDecodeSafeArray<T: Decodable & Sendable>(
         endpoint: Endpoint,
         forceNetwork: Bool
     ) async throws -> [T] {
         let cacheKey = endpoint.cacheKey
-        let cache = diskCache
-        let cachedMeta = cache?.loadMeta(for: cacheKey)
-        let cachedData = cache?.loadData(for: cacheKey)
+        let (cachedMeta, cachedData) = await loadCacheSnapshot(key: cacheKey)
 
         // Свежий кэш — мгновенный ответ (SWR: вызывающий может forceNetwork позже)
-        if !forceNetwork, let cache, let meta = cachedMeta, let data = cachedData, cache.isFresh(meta) {
+        if !forceNetwork, let meta = cachedMeta, let data = cachedData,
+           withCacheLock({ $0.isFresh(meta) }) == true {
             do {
-                return try decodeArray(from: data, endpoint: endpoint)
+                return try await decodeArrayOffMain(from: data, endpoint: endpoint)
             } catch {
                 // Битый fresh cache — снести и идти в сеть
-                cache.remove(key: cacheKey)
+                _ = withCacheLock { cache in
+                    cache.remove(key: cacheKey)
+                }
             }
         }
 
@@ -306,10 +363,10 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 30
-        if let etag = cachedMeta?.etag {
+        if let etag = RemoteURLPolicy.sanitizedHTTPHeaderValue(cachedMeta?.etag) {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
-        if let lastModified = cachedMeta?.lastModified {
+        if let lastModified = RemoteURLPolicy.sanitizedHTTPHeaderValue(cachedMeta?.lastModified) {
             request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
         }
 
@@ -321,19 +378,19 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
 
             if http.statusCode == 304, let cachedData {
                 do {
-                    let items: [T] = try decodeArray(from: cachedData, endpoint: endpoint)
+                    let items: [T] = try await decodeArrayOffMain(from: cachedData, endpoint: endpoint)
                     // Refresh meta only after successful decode (avoid writing bad state)
-                    if let cache {
+                    _ = withCacheLock { cache in
                         try? cache.save(
                             key: cacheKey,
                             data: cachedData,
-                            etag: http.value(forHTTPHeaderField: "ETag") ?? cachedMeta?.etag,
-                            lastModified: http.value(forHTTPHeaderField: "Last-Modified") ?? cachedMeta?.lastModified
+                            etag: RemoteURLPolicy.sanitizedHTTPHeaderValue(http.value(forHTTPHeaderField: "ETag")) ?? cachedMeta?.etag,
+                            lastModified: RemoteURLPolicy.sanitizedHTTPHeaderValue(http.value(forHTTPHeaderField: "Last-Modified")) ?? cachedMeta?.lastModified
                         )
                     }
                     return items
                 } catch {
-                    cache?.remove(key: cacheKey)
+                    _ = withCacheLock { $0.remove(key: cacheKey) }
                     // 304 без валидного тела — полный refetch без conditional headers
                     var full = URLRequest(url: url)
                     full.cachePolicy = .reloadIgnoringLocalCacheData
@@ -346,13 +403,13 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                         )
                     }
                     // Decode before save — never poison disk cache with corrupt 200 body
-                    let items: [T] = try decodeArray(from: freshData, endpoint: endpoint)
-                    if let cache {
+                    let items: [T] = try await decodeArrayOffMain(from: freshData, endpoint: endpoint)
+                    _ = withCacheLock { cache in
                         try? cache.save(
                             key: cacheKey,
                             data: freshData,
-                            etag: freshHTTP.value(forHTTPHeaderField: "ETag"),
-                            lastModified: freshHTTP.value(forHTTPHeaderField: "Last-Modified")
+                            etag: RemoteURLPolicy.sanitizedHTTPHeaderValue(freshHTTP.value(forHTTPHeaderField: "ETag")),
+                            lastModified: RemoteURLPolicy.sanitizedHTTPHeaderValue(freshHTTP.value(forHTTPHeaderField: "Last-Modified"))
                         )
                     }
                     return items
@@ -364,13 +421,13 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
             }
 
             // Decode before save so a corrupt 200 cannot overwrite a still-valid stale cache
-            let items: [T] = try decodeArray(from: data, endpoint: endpoint)
-            if let cache {
+            let items: [T] = try await decodeArrayOffMain(from: data, endpoint: endpoint)
+            _ = withCacheLock { cache in
                 try? cache.save(
                     key: cacheKey,
                     data: data,
-                    etag: http.value(forHTTPHeaderField: "ETag"),
-                    lastModified: http.value(forHTTPHeaderField: "Last-Modified")
+                    etag: RemoteURLPolicy.sanitizedHTTPHeaderValue(http.value(forHTTPHeaderField: "ETag")),
+                    lastModified: RemoteURLPolicy.sanitizedHTTPHeaderValue(http.value(forHTTPHeaderField: "Last-Modified"))
                 )
             }
             return items
@@ -380,9 +437,9 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
             // Сеть/HTTP fail — stale cache (в т.ч. просроченный)
             if let cachedData {
                 do {
-                    return try decodeArray(from: cachedData, endpoint: endpoint)
+                    return try await decodeArrayOffMain(from: cachedData, endpoint: endpoint)
                 } catch {
-                    cache?.remove(key: cacheKey)
+                    _ = withCacheLock { $0.remove(key: cacheKey) }
                 }
             }
             throw error

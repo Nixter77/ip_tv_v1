@@ -30,6 +30,18 @@ public struct LoadCatalogResult: Sendable {
     }
 }
 
+private enum CatalogIndexToken: Sendable {
+    private static let lock = NSLock()
+    private static var value: UInt64 = 0
+
+    static func next() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+        return value
+    }
+}
+
 /// Use case: загрузка + индексация каталога (application layer)
 public struct LoadCatalogUseCase: Sendable {
     private let repository: any PlaylistRepository
@@ -53,6 +65,7 @@ public struct LoadCatalogUseCase: Sendable {
         fallbackLanguages: [Language] = []
     ) async throws -> LoadCatalogResult {
         let options = policy.fetchOptions
+        let generation = CatalogIndexToken.next()
 
         async let channelsFetch = repository.fetchChannels(options: options)
         async let streamsFetch = repository.fetchStreams(options: options)
@@ -91,7 +104,8 @@ public struct LoadCatalogUseCase: Sendable {
             metaWarnings.append("языки")
         }
 
-        await filterEngine.setup(channels: channels, streams: streams)
+        try Task.checkCancellation()
+        await filterEngine.setup(channels: channels, streams: streams, generation: generation)
 
         return LoadCatalogResult(
             channels: channels,
