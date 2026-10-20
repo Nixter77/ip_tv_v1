@@ -1,3 +1,14 @@
+# Task: Fix Critical Security Issues (C5 & C6) from Code Review 3
+
+- [x] C6: Harden RemoteURLPolicy with robust IPv6/IPv4 literal parsing (inet_pton) to prevent SSRF bypass
+- [x] C5: Use early rejection on Content-Length in IPTVRepository before full payload processing
+- [x] M4: Add Task cancellation checks during FilterEngine setup indexing
+- [x] Add SecurityTests for non-canonical IPv6 literals and verify test suite
+- [x] Run swift test and verify 0 failures (62/62 tests passed)
+- [x] Commit and push changes
+
+---
+
 # Security / quality pass (2026-08-15)
 
 Review: `tasks/code-review-1.md`. All critical findings fixed. `swift test` → **61 tests, 0 failures**.

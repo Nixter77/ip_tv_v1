@@ -279,6 +279,12 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
             try Task.checkCancellation()
             do {
                 let (data, response) = try await session.data(for: request)
+                if let http = response as? HTTPURLResponse {
+                    if let lengthString = http.value(forHTTPHeaderField: "Content-Length"),
+                       let length = Int(lengthString), length > maxResponseBytes {
+                        throw PlaylistFetchError.payloadTooLarge(endpoint: endpoint.rawValue, byteCount: length)
+                    }
+                }
                 try rejectIfTooLarge(data, endpoint: endpoint)
                 if let http = response as? HTTPURLResponse {
                     if isRetriableHTTP(http.statusCode), attempt < maxAttempts - 1 {

@@ -77,6 +77,19 @@ public enum RemoteURLPolicy: Sendable {
             return true
         }
 
+        // 1. Check standard IPv4 / IPv6 parsing via inet_pton
+        var addr4 = in_addr()
+        if inet_pton(AF_INET, normalized, &addr4) == 1 {
+            let ip = UInt32(bigEndian: addr4.s_addr)
+            return isRestrictedIPv4(ip)
+        }
+
+        var addr6 = in6_addr()
+        if inet_pton(AF_INET6, normalized, &addr6) == 1 {
+            return isRestrictedIPv6Address(addr6)
+        }
+
+        // 2. Custom parser for forms inet_pton rejects (e.g. dword 2130706433, shorthand 127.1)
         if let ipv4 = parseIPv4(normalized) {
             return isRestrictedIPv4(ipv4)
         }
@@ -91,6 +104,10 @@ public enum RemoteURLPolicy: Sendable {
         if normalized.hasPrefix("[") && normalized.hasSuffix("]") {
             normalized = String(normalized.dropFirst().dropLast())
         }
+        var addr4 = in_addr()
+        if inet_pton(AF_INET, normalized, &addr4) == 1 { return true }
+        var addr6 = in6_addr()
+        if inet_pton(AF_INET6, normalized, &addr6) == 1 { return true }
         return parseIPv4(normalized) != nil || normalized.contains(":")
     }
 
@@ -181,7 +198,45 @@ public enum RemoteURLPolicy: Sendable {
         return false
     }
 
+    private static func isRestrictedIPv6Address(_ addr: in6_addr) -> Bool {
+        var a = addr
+        // 16 bytes array
+        return withUnsafeBytes(of: &a) { raw -> Bool in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            guard bytes.count == 16 else { return true }
+
+            // Loopback ::1: 15 zeros followed by 1
+            let isLoopback = (0..<15).allSatisfy { bytes[$0] == 0 } && bytes[15] == 1
+            // Unspecified :: : all 16 zeros
+            let isUnspecified = (0..<16).allSatisfy { bytes[$0] == 0 }
+            if isLoopback || isUnspecified { return true }
+
+            // IPv4-mapped IPv6 address (::ffff:w.x.y.z): first 10 bytes 0, bytes 10-11 are 0xff
+            let isIPv4Mapped = (0..<10).allSatisfy { bytes[$0] == 0 } && bytes[10] == 0xFF && bytes[11] == 0xFF
+            // IPv4-compatible (deprecated): first 12 bytes 0, followed by non-loopback IPv4
+            let isIPv4Compatible = (0..<12).allSatisfy { bytes[$0] == 0 } && (bytes[12] != 0 || bytes[13] != 0 || bytes[14] != 0 || bytes[15] > 1)
+
+            if isIPv4Mapped || isIPv4Compatible {
+                let ip4 = (UInt32(bytes[12]) << 24) | (UInt32(bytes[13]) << 16) | (UInt32(bytes[14]) << 8) | UInt32(bytes[15])
+                return isRestrictedIPv4(ip4)
+            }
+
+            // Unique Local Address (fc00::/7): first byte has high 7 bits as 1111110 (0xFC or 0xFD)
+            let b0 = bytes[0]
+            if (b0 & 0xFE) == 0xFC { return true }
+
+            // Link-Local (fe80::/10): first byte 0xFE, second byte high 2 bits are 10 (0x80..0xBF)
+            if b0 == 0xFE && (bytes[1] & 0xC0) == 0x80 { return true }
+
+            return false
+        }
+    }
+
     private static func isRestrictedIPv6(_ host: String) -> Bool {
+        var addr6 = in6_addr()
+        if inet_pton(AF_INET6, host, &addr6) == 1 {
+            return isRestrictedIPv6Address(addr6)
+        }
         if host == "::1" || host == "::" || host == "0:0:0:0:0:0:0:1" {
             return true
         }
@@ -232,11 +287,7 @@ public enum RemoteURLPolicy: Sendable {
             }
         case AF_INET6:
             return addr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { pointer in
-                var addr6 = pointer.pointee.sin6_addr
-                var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-                inet_ntop(AF_INET6, &addr6, &buffer, socklen_t(INET6_ADDRSTRLEN))
-                let text = String(cString: buffer)
-                return isRestrictedIPv6(text)
+                isRestrictedIPv6Address(pointer.pointee.sin6_addr)
             }
         default:
             return true

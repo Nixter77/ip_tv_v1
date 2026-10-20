@@ -104,7 +104,10 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
 
         // 2. Индексируем каналы
         let nonAlphanumerics = Self.nonAlphanumerics
-        for channel in channels {
+        for (index, channel) in channels.enumerated() {
+            if index % 2000 == 0 {
+                if Task.isCancelled { return }
+            }
             guard newActiveStreams[channel.id] != nil else { continue }
             
             newChannels[channel.id] = channel
