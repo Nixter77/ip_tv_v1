@@ -163,7 +163,9 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func toggleFavorite(channelId: String) {
-        let name = catalog.name(for: channelId) ?? "Канал"
+        // Prefer catalog name (kept for all loaded IDs, not just the filtered list).
+        // Never persist the placeholder «Канал» (A4 / S2).
+        let name = catalog.name(for: channelId) ?? channelId
         library.toggleFavorite(id: channelId, name: name)
     }
 
