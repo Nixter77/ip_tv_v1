@@ -129,6 +129,20 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(vm.filteredChannels.count, 0)
     }
 
+    func test_rewritingTheSameVisibleStateDoesNotPublish() throws {
+        let vm = try XCTUnwrap(viewModel)
+        var publishes = 0
+        let token = vm.objectWillChange.sink { _ in publishes += 1 }
+        let baseline = publishes
+        vm.searchQuery = vm.searchQuery
+        vm.selectedTab = vm.selectedTab
+        vm.showNSFW = vm.showNSFW
+        vm.showClosed = vm.showClosed
+        vm.isPlayerDetached = vm.isPlayerDetached
+        XCTAssertEqual(publishes, baseline)
+        token.cancel()
+    }
+
     func test_searchQuery_isCapped() {
         guard let vm = viewModel else {
             XCTFail("viewModel missing")

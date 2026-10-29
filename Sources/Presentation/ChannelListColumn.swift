@@ -67,11 +67,6 @@ struct ChannelListColumn: View {
                     onFavoriteToggle: { viewModel.toggleFavorite(channel) }
                 )
                 .tag(channel)
-                .simultaneousGesture(TapGesture().onEnded {
-                    if selectedChannel?.id == channel.id {
-                        Task { await viewModel.selectChannel(channel) }
-                    }
-                })
             }
             if listWindow < rows.count {
                 Text("Загрузить ещё…")

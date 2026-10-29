@@ -74,11 +74,17 @@ public final class AppViewModel: ObservableObject {
     public var loadingState: AppLoadingState { catalog.loadingState }
     public var searchQuery: String {
         get { catalog.searchQuery }
-        set { catalog.searchQuery = newValue }
+        set {
+            guard catalog.searchQuery != newValue else { return }
+            catalog.searchQuery = newValue
+        }
     }
     public var selectedTab: SidebarTab {
         get { catalog.selectedTab }
-        set { catalog.selectedTab = newValue }
+        set {
+            guard catalog.selectedTab != newValue else { return }
+            catalog.selectedTab = newValue
+        }
     }
     public var filteredChannels: [Channel] { catalog.filteredChannels }
     public var categories: [Category] { catalog.categories }
@@ -89,7 +95,10 @@ public final class AppViewModel: ObservableObject {
     public var isRefreshing: Bool { catalog.isRefreshing }
     public var isPlayerDetached: Bool {
         get { playback.isDetached }
-        set { playback.isDetached = newValue }
+        set {
+            guard playback.isDetached != newValue else { return }
+            playback.isDetached = newValue
+        }
     }
     public var statusBanner: String? { library.statusBanner ?? catalog.statusBanner }
     public var statusSeverity: StatusSeverity {
@@ -101,11 +110,17 @@ public final class AppViewModel: ObservableObject {
     public var nowPlayingTitle: String? { playback.nowPlayingTitle }
     public var showNSFW: Bool {
         get { catalog.showNSFW }
-        set { catalog.showNSFW = newValue }
+        set {
+            guard catalog.showNSFW != newValue else { return }
+            catalog.showNSFW = newValue
+        }
     }
     public var showClosed: Bool {
         get { catalog.showClosed }
-        set { catalog.showClosed = newValue }
+        set {
+            guard catalog.showClosed != newValue else { return }
+            catalog.showClosed = newValue
+        }
     }
 
     public func dismissStatusBanner() {

@@ -73,8 +73,8 @@ public struct MainSplitView: View {
             viewModel.togglePause()
             return .handled
         }
-        .onChange(of: selectedChannel) { _, channel in
-            guard let channel else { return }
+        .onChange(of: selectedChannel?.id) { _, newID in
+            guard let newID, let channel = selectedChannel, channel.id == newID else { return }
             Task { await viewModel.selectChannel(channel) }
         }
     }

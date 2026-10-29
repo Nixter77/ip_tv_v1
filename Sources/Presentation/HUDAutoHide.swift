@@ -5,15 +5,15 @@ import AppKit
 
 // MARK: - Auto-Hide Modifier
 
-/// Отслеживает движение мыши внутри окна и управляет видимостью HUD + системного курсора.
-/// HUD исчезает через `hideDelay` секунд после прекращения движения.
+/// Отслеживает движение мыши внутри окна плеера и прячет только панель HUD.
+/// Системный курсор не трогаем: `NSCursor.hide()` гасит указатель на всё приложение,
+/// а список каналов живёт в том же `NSWindow`, куда `mouseMoved` часто не доходит.
 struct AutoHideHUDModifier: ViewModifier {
     let hideDelay: TimeInterval
     @Binding var isVisible: Bool
 
     @StateObject private var mouse = HUDWindowMouseMonitor()
     @State private var hideTimer: Timer?
-    @State private var isCursorHidden = false
 
     func body(content: Content) -> some View {
         content
@@ -25,14 +25,12 @@ struct AutoHideHUDModifier: ViewModifier {
             .onAppear { scheduleShow() }
             .onDisappear {
                 hideTimer?.invalidate()
-                if isCursorHidden { NSCursor.unhide() }
                 mouse.stop()
             }
     }
 
     private func scheduleShow() {
         hideTimer?.invalidate()
-        if isCursorHidden { NSCursor.unhide(); isCursorHidden = false }
         if !isVisible {
             withAnimation(.easeInOut(duration: 0.25)) { isVisible = true }
         }
@@ -46,7 +44,6 @@ struct AutoHideHUDModifier: ViewModifier {
     private func scheduleHide() {
         hideTimer?.invalidate()
         withAnimation(.easeInOut(duration: 0.25)) { isVisible = false }
-        if !isCursorHidden { NSCursor.hide(); isCursorHidden = true }
     }
 }
 
@@ -59,6 +56,9 @@ private final class HUDWindowMouseMonitor: ObservableObject {
     func attach(to window: NSWindow, onMoved: @escaping () -> Void) {
         self.window = window
         self.onMoved = onMoved
+        MainActor.assumeIsolated {
+            window.acceptsMouseMovedEvents = true
+        }
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self, let tracked = self.window, event.window == tracked else {
