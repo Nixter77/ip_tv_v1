@@ -8,8 +8,9 @@ import FoundationNetworking
 
 final class URLProtocolMock: URLProtocol {
     private static let lock = NSLock()
-    private static var storage: [URL: (Data, URLResponse, Error?)] = [:]
-    private static var last: URLRequest?
+    nonisolated(unsafe) private static var storage: [URL: (Data, URLResponse, Error?)] = [:]
+    nonisolated(unsafe) private static var last: URLRequest?
+    nonisolated(unsafe) private static var starts: [String: Int] = [:]
 
     static var mockData: [URL: (Data, URLResponse, Error?)] {
         get { lock.lock(); defer { lock.unlock() }; return storage }
@@ -19,6 +20,16 @@ final class URLProtocolMock: URLProtocol {
     static var lastRequest: URLRequest? {
         get { lock.lock(); defer { lock.unlock() }; return last }
         set { lock.lock(); defer { lock.unlock() }; last = newValue }
+    }
+
+    static func startCount(for url: URL) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return starts[url.absoluteString] ?? 0
+    }
+
+    static func resetStartCounts() {
+        lock.lock(); defer { lock.unlock() }
+        starts.removeAll()
     }
 
     override class func canInit(with request: URLRequest) -> Bool {
@@ -32,6 +43,9 @@ final class URLProtocolMock: URLProtocol {
     override func startLoading() {
         Self.lock.lock()
         Self.last = request
+        if let key = request.url?.absoluteString {
+            Self.starts[key, default: 0] += 1
+        }
         let snapshot = request.url.flatMap { Self.storage[$0] }
         Self.lock.unlock()
         if let (data, response, error) = snapshot {

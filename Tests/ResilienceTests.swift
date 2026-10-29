@@ -157,8 +157,17 @@ final class RepositoryResilienceTests: XCTestCase {
         URLProtocolMock.mockData[url] = (validChannelsJSON("stale.us"), okResponse(url: url), nil)
         _ = try await repo.fetchChannels(options: .forceNetwork)
 
-        // Expire TTL
-        try await Task.sleep(nanoseconds: 1_100_000_000)
+        struct Meta: Codable {
+            var fetchedAt: Date
+            var etag: String?
+            var lastModified: String?
+            var contentLength: Int
+        }
+        let metaURL = cacheDir.appendingPathComponent("channels.meta.json")
+        let metaData = try Data(contentsOf: metaURL)
+        var meta = try JSONDecoder().decode(Meta.self, from: metaData)
+        meta.fetchedAt = Date(timeIntervalSinceNow: -10)
+        try JSONEncoder().encode(meta).write(to: metaURL)
 
         URLProtocolMock.mockData[url] = (
             Data(),
@@ -365,8 +374,7 @@ final class LibraryResilienceTests: XCTestCase {
         vm.toggleFavorite(channelId: "cnn")
         XCTAssertTrue(vm.favoriteIds.contains("cnn"), "optimistic insert")
 
-        // Allow persist Task to run and roll back
-        try await Task.sleep(nanoseconds: 200_000_000)
+        await vm.flushLibraryWrites()
 
         XCTAssertFalse(vm.favoriteIds.contains("cnn"), "must roll back on persist failure")
         XCTAssertEqual(vm.statusBanner, "Не удалось сохранить избранное")

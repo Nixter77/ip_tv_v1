@@ -11,6 +11,12 @@ public struct Channel: Identifiable, Equatable, Hashable, Sendable {
     public let categories: [String]
     public let logo: String?
     public let website: String?
+    public let isNSFW: Bool
+    /// Non-nil date string from the catalog (`YYYY-MM-DD`) means the channel has closed.
+    public let closed: String?
+    public let altNames: [String]
+    public let network: String?
+    public let replacedBy: String?
 
     public init(
         id: String,
@@ -19,7 +25,12 @@ public struct Channel: Identifiable, Equatable, Hashable, Sendable {
         languages: [String],
         categories: [String],
         logo: String?,
-        website: String?
+        website: String?,
+        isNSFW: Bool = false,
+        closed: String? = nil,
+        altNames: [String] = [],
+        network: String? = nil,
+        replacedBy: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -28,6 +39,11 @@ public struct Channel: Identifiable, Equatable, Hashable, Sendable {
         self.categories = categories
         self.logo = logo
         self.website = website
+        self.isNSFW = isNSFW
+        self.closed = closed
+        self.altNames = altNames
+        self.network = network
+        self.replacedBy = replacedBy
     }
 
     /// Logo URL safe to fetch (http(s) + public host). Nil for file/localhost/RFC1918/credentials.
@@ -44,13 +60,31 @@ public struct Stream: Equatable, Hashable, Sendable {
     public let status: String?
     public let timeshift: Int?
     public let httpReferrer: String?
+    public let userAgent: String?
+    public let quality: String?
+    public let feed: String?
+    public let title: String?
 
-    public init(channel: String, urlString: String, status: String?, timeshift: Int?, httpReferrer: String?) {
+    public init(
+        channel: String,
+        urlString: String,
+        status: String?,
+        timeshift: Int?,
+        httpReferrer: String?,
+        userAgent: String? = nil,
+        quality: String? = nil,
+        feed: String? = nil,
+        title: String? = nil
+    ) {
         self.channel = channel
         self.urlString = urlString
         self.status = status
         self.timeshift = timeshift
         self.httpReferrer = httpReferrer
+        self.userAgent = userAgent
+        self.quality = quality
+        self.feed = feed
+        self.title = title
     }
 
     public var url: URL? {
@@ -123,11 +157,18 @@ public struct Stream: Equatable, Hashable, Sendable {
 
 /// Категория каналов
 public struct Category: Identifiable, Hashable, Sendable {
-    public var id: String { name.lowercased() }
+    public let id: String
     public let name: String
 
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    /// Legacy catalogs that only shipped a display name.
     public init(name: String) {
         self.name = name
+        self.id = name.lowercased()
     }
 }
 

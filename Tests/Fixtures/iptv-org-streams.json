@@ -1,0 +1,64 @@
+[
+  {
+    "channel": "1Plus1International.ua",
+    "feed": "SD",
+    "title": "1+1 International",
+    "url": "http://158.101.222.193:88/georgia_play.php?id=1plus1international",
+    "quality": null,
+    "labels": [],
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "referrer": null
+  },
+  {
+    "channel": "1Plus1Ukraina.ua",
+    "feed": "SD",
+    "title": "1+1 Ukraina",
+    "url": "http://stream.mcquack.net/219/index.m3u8",
+    "quality": "1080p",
+    "labels": [],
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "referrer": null
+  },
+  {
+    "channel": "2MMonde.ma",
+    "feed": "SD",
+    "title": "2M Monde",
+    "url": "https://cdn-globecast.akamaized.net/live/eds/2m_monde/hls_video_ts_tuhawxpiemz257adfc/2m_monde.m3u8",
+    "quality": "360p",
+    "labels": [],
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0",
+    "referrer": "http://www.radio2m.ma/"
+  },
+  {
+    "channel": "2Plus2.ua",
+    "feed": "SD",
+    "title": "2+2",
+    "url": "http://stream.mcquack.net/173/index.m3u8",
+    "quality": "1080p",
+    "labels": [],
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "referrer": null
+  },
+  {
+    "channel": "2x2.ru",
+    "feed": "SD",
+    "title": "2х2",
+    "url": "https://zabava-htlive.cdn.ngenix.net/hls/CH_2X2/variant.m3u8",
+    "quality": "450p",
+    "labels": [
+      "Geo-blocked"
+    ],
+    "user_agent": "WINK/1.40.1 (AndroidTV/9) HlsWinkPlayer",
+    "referrer": null
+  },
+  {
+    "channel": "4TVNews.in",
+    "feed": "SD",
+    "title": "4TV News",
+    "url": "https://fta.ektv.in/live/647/master.m3u8",
+    "quality": "576p",
+    "labels": [],
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+    "referrer": null
+  }
+]

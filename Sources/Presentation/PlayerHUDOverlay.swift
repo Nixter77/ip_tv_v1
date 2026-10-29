@@ -14,49 +14,49 @@ struct PlayerHUDOverlay: View {
                 EmptyView()
             case .loading(let stream):
                 ZStack {
-                    Color.black.opacity(0.6)
-                    VStack(spacing: 16) {
+                    Palette.video.opacity(0.6)
+                    VStack(spacing: Spacing.xl) {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .progressViewStyle(CircularProgressViewStyle(tint: Palette.hudInk))
                         Text("Буферизация трансляции...")
-                            .foregroundColor(.white)
+                            .foregroundStyle(Palette.hudInk)
                             .font(.headline)
                         Text(stream.maskedUrlString)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .padding(.horizontal)
+                            .padding(.horizontal, Spacing.l)
                     }
                 }
             case .playing:
                 EmptyView()
             case .failed(let stream, let error):
                 ZStack {
-                    Color.black.opacity(0.8)
-                    VStack(spacing: 16) {
+                    Palette.video.opacity(0.8)
+                    VStack(spacing: Spacing.xl) {
                         Image(systemName: "xmark.octagon.fill")
-                            .font(.system(size: 48))
-                            .foregroundColor(.red)
+                            .font(.largeTitle)
+                            .foregroundStyle(Palette.error)
                         Text("Ошибка воспроизведения")
                             .font(.headline)
-                            .foregroundColor(.white)
+                            .foregroundStyle(Palette.hudInk)
                         Text(error)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
-                            .padding(.horizontal)
+                            .padding(.horizontal, Spacing.l)
                         Text(stream.maskedUrlString)
                             .font(.caption2)
-                            .foregroundColor(.gray)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .padding(.horizontal)
+                            .padding(.horizontal, Spacing.l)
 
                         if let onRetry = onRetry {
                             Button(action: onRetry) {
                                 Label("Попробовать снова", systemImage: "arrow.clockwise")
                             }
                             .buttonStyle(.bordered)
-                            .tint(.white)
-                            .padding(.top, 8)
+                            .tint(Palette.hudInk)
+                            .padding(.top, Spacing.m)
                             .help("Попробовать загрузить поток еще раз")
                             .accessibilityLabel("Попробовать снова")
                         }

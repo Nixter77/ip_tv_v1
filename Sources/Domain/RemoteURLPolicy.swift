@@ -57,6 +57,12 @@ public enum RemoteURLPolicy: Sendable {
         return trimmed
     }
 
+    /// User-Agent for playback. Same CTL rules as other header values, capped so a catalog field cannot flood the request.
+    public static func sanitizedUserAgent(_ raw: String?) -> String? {
+        guard let value = sanitizedHTTPHeaderValue(raw) else { return nil }
+        return String(value.prefix(512))
+    }
+
     public static func isRestrictedHost(_ host: String) -> Bool {
         var normalized = host.lowercased()
         if normalized.hasPrefix("[") && normalized.hasSuffix("]") {

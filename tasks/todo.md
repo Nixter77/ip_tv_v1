@@ -1,3 +1,10 @@
+# Improvement plan phases 0–3 (2026-10-29)
+
+## Review
+Playlist downloads stop at the byte cap while the body is still arriving. `text/html` is rejected before decode and is not written to the catalog cache. The mapper accepts the current iptv-org payload and the previous one. Catalog, library, and playback are separate stores. Debounce and playback timeouts advance `ManualSuspendingClock`. `swift test`: 76 tests, 0 failures. `swift build --product IPTVPlayerApp`: no warnings. `DESIGN.md` lint: 0 errors.
+
+---
+
 # Task: Fix Critical Security Issues (C5 & C6) from Code Review 3
 
 - [x] C6: Harden RemoteURLPolicy with robust IPv6/IPv4 literal parsing (inet_pton) to prevent SSRF bypass

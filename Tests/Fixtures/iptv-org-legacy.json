@@ -1,0 +1,26 @@
+{
+  "channels": [
+    {
+      "id": "legacy.cnn",
+      "name": "Legacy CNN",
+      "country": "US",
+      "languages": [
+        "eng"
+      ],
+      "categories": [
+        "news"
+      ],
+      "logo": "https://example.com/legacy-cnn.png",
+      "website": "https://cnn.com"
+    }
+  ],
+  "streams": [
+    {
+      "channel": "legacy.cnn",
+      "url": "https://example.com/legacy.m3u8",
+      "status": "active",
+      "http_referrer": "https://cnn.com/watch",
+      "timeshift": 0
+    }
+  ]
+}

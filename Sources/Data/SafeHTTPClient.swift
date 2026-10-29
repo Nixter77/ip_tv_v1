@@ -7,7 +7,7 @@ import FoundationNetworking
 
 public enum SafeHTTPError: Error, Equatable, Sendable {
     case blockedURL
-    case tooLarge
+    case tooLarge(bytesSeen: Int)
     case noResponse
 }
 
@@ -52,10 +52,21 @@ public final class SafeHTTPClient: NSObject, URLSessionDataDelegate, @unchecked 
         maxBytes: Int,
         kind: RemoteResourceKind = .remoteAsset
     ) async throws -> (Data, URLResponse) {
-        guard RemoteURLPolicy.validatedURL(from: url.absoluteString, kind: kind) != nil else {
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
+        request.url = url
+        return try await data(for: request, maxBytes: maxBytes, kind: kind)
+    }
+
+    /// Streaming fetch. The body is not retained once it passes `maxBytes`, including when Content-Length is missing or smaller than the bytes that arrive.
+    public func data(
+        for request: URLRequest,
+        maxBytes: Int,
+        kind: RemoteResourceKind = .remoteAsset
+    ) async throws -> (Data, URLResponse) {
+        guard let url = request.url,
+              RemoteURLPolicy.validatedURL(from: url.absoluteString, kind: kind) != nil else {
             throw SafeHTTPError.blockedURL
         }
-        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 15)
         return try await withCheckedThrowingContinuation { continuation in
             let task = session.dataTask(with: request)
             lock.lock()
@@ -106,7 +117,8 @@ public final class SafeHTTPClient: NSObject, URLSessionDataDelegate, @unchecked 
         }
         if response.expectedContentLength > 0, response.expectedContentLength > Int64(maxBytes) {
             completionHandler(.cancel)
-            finish(taskIdentifier: dataTask.taskIdentifier, result: .failure(SafeHTTPError.tooLarge))
+            let seen = Int(min(response.expectedContentLength, Int64(Int.max)))
+            finish(taskIdentifier: dataTask.taskIdentifier, result: .failure(SafeHTTPError.tooLarge(bytesSeen: seen)))
             return
         }
         lock.lock()
@@ -117,18 +129,22 @@ public final class SafeHTTPClient: NSObject, URLSessionDataDelegate, @unchecked 
 
     public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         lock.lock()
-        inflight[dataTask.taskIdentifier]?.buffer.append(data)
-        let oversize: Bool
-        if let state = inflight[dataTask.taskIdentifier] {
-            oversize = state.buffer.count > state.maxBytes
-        } else {
-            oversize = false
+        guard var state = inflight[dataTask.taskIdentifier], !state.finished else {
+            lock.unlock()
+            return
         }
-        lock.unlock()
-        if oversize {
+        let seen = state.buffer.count + data.count
+        if seen > state.maxBytes {
+            state.buffer.removeAll(keepingCapacity: false)
+            inflight[dataTask.taskIdentifier] = state
+            lock.unlock()
             dataTask.cancel()
-            finish(taskIdentifier: dataTask.taskIdentifier, result: .failure(SafeHTTPError.tooLarge))
+            finish(taskIdentifier: dataTask.taskIdentifier, result: .failure(SafeHTTPError.tooLarge(bytesSeen: seen)))
+            return
         }
+        state.buffer.append(data)
+        inflight[dataTask.taskIdentifier] = state
+        lock.unlock()
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -152,7 +168,7 @@ public final class SafeHTTPClient: NSObject, URLSessionDataDelegate, @unchecked 
             return
         }
         if state.buffer.count > state.maxBytes {
-            finish(taskIdentifier: id, result: .failure(SafeHTTPError.tooLarge))
+            finish(taskIdentifier: id, result: .failure(SafeHTTPError.tooLarge(bytesSeen: state.buffer.count)))
             return
         }
         finish(taskIdentifier: id, result: .success((state.buffer, response)))

@@ -30,14 +30,11 @@ public struct LoadCatalogResult: Sendable {
     }
 }
 
-private enum CatalogIndexToken: Sendable {
-    private static let lock = NSLock()
-    private static var value: UInt64 = 0
+private actor CatalogGeneration {
+    private var value: UInt64 = 0
 
-    static func next() -> UInt64 {
-        lock.lock()
-        defer { lock.unlock() }
-        value += 1
+    func next() -> UInt64 {
+        value &+= 1
         return value
     }
 }
@@ -46,6 +43,7 @@ private enum CatalogIndexToken: Sendable {
 public struct LoadCatalogUseCase: Sendable {
     private let repository: any PlaylistRepository
     private let filterEngine: any ChannelFilterEngineProtocol
+    private let generations = CatalogGeneration()
 
     public init(
         repository: any PlaylistRepository,
@@ -65,7 +63,7 @@ public struct LoadCatalogUseCase: Sendable {
         fallbackLanguages: [Language] = []
     ) async throws -> LoadCatalogResult {
         let options = policy.fetchOptions
-        let generation = CatalogIndexToken.next()
+        let generation = await generations.next()
 
         async let channelsFetch = repository.fetchChannels(options: options)
         async let streamsFetch = repository.fetchStreams(options: options)
@@ -110,9 +108,9 @@ public struct LoadCatalogUseCase: Sendable {
         return LoadCatalogResult(
             channels: channels,
             streams: streams,
-            categories: cats.sorted { $0.name < $1.name },
-            countries: ctrs.sorted { $0.name < $1.name },
-            languages: langs.sorted { $0.name < $1.name },
+            categories: cats.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+            countries: ctrs.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+            languages: langs.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
             metaWarnings: metaWarnings,
             shouldScheduleRevalidate: policy.shouldScheduleRevalidate
         )

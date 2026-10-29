@@ -72,5 +72,3 @@ public extension PlaylistRepository {
     }
 }
 
-/// Backward-compatible alias used by older call sites / tests
-public typealias IPTVRepositoryProtocol = PlaylistRepository

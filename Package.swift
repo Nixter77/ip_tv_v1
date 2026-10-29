@@ -1,10 +1,13 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 
+let swift6: [SwiftSetting] = [
+    .swiftLanguageMode(.v6)
+]
+
 var products: [Product] = [
-    // 1. Library for tests and reuse.
     .library(
         name: "IPTVPlayer",
         targets: ["IPTVPlayer"]
@@ -12,23 +15,25 @@ var products: [Product] = [
 ]
 
 var targets: [Target] = [
-    // Core application/library target.
     .target(
         name: "IPTVPlayer",
         dependencies: [],
-        path: "Sources"
+        path: "Sources",
+        swiftSettings: swift6
     ),
-    // Unit tests.
     .testTarget(
         name: "IPTVPlayerTests",
         dependencies: ["IPTVPlayer"],
-        path: "Tests"
+        path: "Tests",
+        resources: [
+            .copy("Fixtures")
+        ],
+        swiftSettings: swift6
     ),
 ]
 
 #if os(macOS)
 products.append(
-    // 2. Executable graphical macOS SwiftUI application.
     .executable(
         name: "IPTVPlayerApp",
         targets: ["IPTVPlayerApp"]
@@ -36,11 +41,11 @@ products.append(
 )
 
 targets.append(
-    // Executable target with the app entry point.
     .executableTarget(
         name: "IPTVPlayerApp",
         dependencies: ["IPTVPlayer"],
-        path: "App"
+        path: "App",
+        swiftSettings: swift6
     )
 )
 #endif

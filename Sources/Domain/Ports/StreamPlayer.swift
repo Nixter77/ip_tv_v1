@@ -22,5 +22,3 @@ public protocol StreamPlayer: AnyObject, ObservableObject where ObjectWillChange
     var preferredBitrate: Double { get set }
 }
 
-/// Backward-compatible name
-public typealias PlayerStateManagerProtocol = StreamPlayer

@@ -1,0 +1,206 @@
+[
+  {
+    "channel": "002RadioTV.do",
+    "id": "SD",
+    "name": "SD",
+    "alt_names": [],
+    "is_main": true,
+    "broadcast_area": [
+      "c/DO"
+    ],
+    "timezones": [
+      "America/Santo_Domingo"
+    ],
+    "languages": [
+      "spa"
+    ],
+    "format": "480i"
+  },
+  {
+    "channel": "1000xHoraTV.uy",
+    "id": "SD",
+    "name": "SD",
+    "alt_names": [],
+    "is_main": true,
+    "broadcast_area": [
+      "c/UY"
+    ],
+    "timezones": [
+      "America/Montevideo"
+    ],
+    "languages": [
+      "spa"
+    ],
+    "format": "576i"
+  },
+  {
+    "channel": "10Bold.au",
+    "id": "Adelaide",
+    "name": "Adelaide",
+    "alt_names": [],
+    "is_main": false,
+    "broadcast_area": [
+      "s/AU-SA"
+    ],
+    "timezones": [
+      "Australia/Adelaide"
+    ],
+    "languages": [
+      "eng"
+    ],
+    "format": "576i"
+  },
+  {
+    "channel": "10Bold.au",
+    "id": "Brisbane",
+    "name": "Brisbane",
+    "alt_names": [],
+    "is_main": false,
+    "broadcast_area": [
+      "s/AU-QLD"
+    ],
+    "timezones": [
+      "Australia/Brisbane"
+    ],
+    "languages": [
+      "eng"
+    ],
+    "format": "576i"
+  },
+  {
+    "channel": "10Bold.au",
+    "id": "Hobart",
+    "name": "Hobart",
+    "alt_names": [],
+    "is_main": false,
+    "broadcast_area": [
+      "s/AU-TAS"
+    ],
+    "timezones": [
+      "Australia/Hobart"
+    ],
+    "languages": [
+      "eng"
+    ],
+    "format": "576i"
+  },
+  {
+    "channel": "10Bold.au",
+    "id": "Melbourne",
+    "name": "Melbourne",
+    "alt_names": [],
+    "is_main": false,
+    "broadcast_area": [
+      "s/AU-VIC"
+    ],
+    "timezones": [
+      "Australia/Melbourne"
+    ],
+    "languages": [
+      "eng"
+    ],
+    "format": "576i"
+  },
+  {
+    "channel": "10Bold.au",
+    "id": "Perth",
+    "name": "Perth",
+    "alt_names": [],
+    "is_main": false,
+    "broadcast_area": [
+      "s/AU-WA"
+    ],
+    "timezones": [
+      "Australia/Perth"
+    ],
+    "languages": [
+      "eng"
+    ],
+    "format": "576i"
+  },
+  {
+    "channel": "10Bold.au",
+    "id": "Sydney",
+    "name": "Sydney",
+    "alt_names": [],
+    "is_main": true,
+    "broadcast_area": [
+      "ct/AUSYD"
+    ],
+    "timezones": [
+      "Australia/Sydney"
+    ],
+    "languages": [
+      "eng"
+    ],
+    "format": "576i"
+  },
+  {
+    "channel": "123tv.de",
+    "id": "SD",
+    "name": "SD",
+    "alt_names": [],
+    "is_main": true,
+    "broadcast_area": [
+      "c/DE"
+    ],
+    "timezones": [
+      "Europe/Berlin"
+    ],
+    "languages": [
+      "deu"
+    ],
+    "format": "576i"
+  },
+  {
+    "channel": "1Plus1International.ua",
+    "id": "HD",
+    "name": "HD",
+    "alt_names": [],
+    "is_main": false,
+    "broadcast_area": [
+      "r/EU"
+    ],
+    "timezones": [
+      "Europe/Kyiv"
+    ],
+    "languages": [
+      "ukr"
+    ],
+    "format": "1080p"
+  },
+  {
+    "channel": "1Plus1International.ua",
+    "id": "SD",
+    "name": "SD",
+    "alt_names": [],
+    "is_main": true,
+    "broadcast_area": [
+      "r/EUR"
+    ],
+    "timezones": [
+      "Europe/Kyiv"
+    ],
+    "languages": [
+      "ukr"
+    ],
+    "format": "576i"
+  },
+  {
+    "channel": "21Sextury.us",
+    "id": "SD",
+    "name": "SD",
+    "alt_names": [],
+    "is_main": true,
+    "broadcast_area": [
+      "c/US"
+    ],
+    "timezones": [
+      "America/New_York"
+    ],
+    "languages": [
+      "eng"
+    ],
+    "format": "480i"
+  }
+]

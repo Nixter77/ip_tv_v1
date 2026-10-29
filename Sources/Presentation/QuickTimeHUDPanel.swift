@@ -4,86 +4,6 @@ import SwiftUI
 import AVFoundation
 import AppKit
 
-// MARK: - Auto-Hide Modifier
-
-/// Отслеживает движение мыши внутри окна и управляет видимостью HUD + системного курсора.
-/// HUD исчезает через `hideDelay` секунд после прекращения движения.
-struct AutoHideHUDModifier: ViewModifier {
-    let hideDelay: TimeInterval
-    @Binding var isVisible: Bool
-
-    @StateObject private var mouse = HUDWindowMouseMonitor()
-    @State private var hideTimer: Timer?
-    @State private var isCursorHidden = false
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(isVisible ? 1 : 0)
-            .animation(.easeInOut(duration: 0.25), value: isVisible)
-            .background(WindowAccessor { window in
-                mouse.attach(to: window, onMoved: scheduleShow)
-            })
-            .onAppear { scheduleShow() }
-            .onDisappear {
-                hideTimer?.invalidate()
-                if isCursorHidden { NSCursor.unhide() }
-                mouse.stop()
-            }
-    }
-
-    private func scheduleShow() {
-        hideTimer?.invalidate()
-        if isCursorHidden { NSCursor.unhide(); isCursorHidden = false }
-        if !isVisible {
-            withAnimation(.easeInOut(duration: 0.25)) { isVisible = true }
-        }
-        hideTimer = Timer.scheduledTimer(withTimeInterval: hideDelay, repeats: false) { _ in
-            scheduleHide()
-        }
-    }
-
-    private func scheduleHide() {
-        hideTimer?.invalidate()
-        withAnimation(.easeInOut(duration: 0.25)) { isVisible = false }
-        if !isCursorHidden { NSCursor.hide(); isCursorHidden = true }
-    }
-}
-
-/// One monitor per HUD instance so main + detached windows do not clobber each other.
-private final class HUDWindowMouseMonitor: ObservableObject {
-    private var monitor: Any?
-    private weak var window: NSWindow?
-    private var onMoved: (() -> Void)?
-
-    func attach(to window: NSWindow, onMoved: @escaping () -> Void) {
-        self.window = window
-        self.onMoved = onMoved
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self, let tracked = self.window, event.window == tracked else {
-                return event
-            }
-            self.onMoved?()
-            return event
-        }
-    }
-
-    func stop() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        onMoved = nil
-        window = nil
-    }
-
-    deinit { stop() }
-}
-
-extension View {
-    func autoHideHUD(isVisible: Binding<Bool>, hideDelay: TimeInterval = 3.0) -> some View {
-        modifier(AutoHideHUDModifier(hideDelay: hideDelay, isVisible: isVisible))
-    }
-}
-
 // MARK: - QuickTime HUD Panel
 
 /// Стеклянная плавающая панель управления в стиле QuickTime Player.
@@ -91,25 +11,24 @@ public struct QuickTimeHUDPanel: View {
     let player: AVPlayer
     let channelName: String?
     let isFavorite: Bool
+    let isPaused: Bool
 
+    var onTogglePlayPause: (() -> Void)?
     var onToggleFullscreen: (() -> Void)?
     var onDetachPlayer: (() -> Void)?
     var onToggleFavorite: (() -> Void)?
     var preferredBitrate: Binding<Double>?
 
-    @State private var currentTime: Double = 0
-    @State private var duration: Double = 1
-    @State private var isSeeking: Bool = false
+    @StateObject private var clock = HUDTimeModel()
     @State private var volume: Float = 1.0
     @State private var timeObserverToken: Any?
-    /// Live IPTV: indefinite duration — throttle UI updates
-    @State private var isLiveStream: Bool = false
-    @State private var lastLiveUIUpdate: TimeInterval = 0
 
     public init(
         player: AVPlayer,
         channelName: String? = nil,
         isFavorite: Bool = false,
+        isPaused: Bool = true,
+        onTogglePlayPause: (() -> Void)? = nil,
         onToggleFullscreen: (() -> Void)? = nil,
         onDetachPlayer: (() -> Void)? = nil,
         onToggleFavorite: (() -> Void)? = nil,
@@ -118,6 +37,8 @@ public struct QuickTimeHUDPanel: View {
         self.player = player
         self.channelName = channelName
         self.isFavorite = isFavorite
+        self.isPaused = isPaused
+        self.onTogglePlayPause = onTogglePlayPause
         self.onToggleFullscreen = onToggleFullscreen
         self.onDetachPlayer = onDetachPlayer
         self.onToggleFavorite = onToggleFavorite
@@ -125,27 +46,27 @@ public struct QuickTimeHUDPanel: View {
     }
 
     public var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: Spacing.m) {
             timelineView
-                .padding(.horizontal, 14)
+                .padding(.horizontal, Spacing.l)
 
-            HStack(spacing: 12) {
-                Button(action: togglePlayPause) {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 24, weight: .medium))
-                        .frame(width: 36, height: 36)
+            HStack(spacing: Spacing.l) {
+                Button(action: { onTogglePlayPause?() }) {
+                    Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                        .font(.title2)
+                        .frame(width: Layout.playControl, height: Layout.playControl)
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
 
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     Image(systemName: volumeIcon)
-                        .font(.system(size: 13))
-                        .frame(width: 18)
+                        .font(.caption)
+                        .frame(width: Spacing.xl)
                     Slider(value: $volume, in: 0...1) { _ in
                         player.volume = volume
                     }
-                    .frame(width: 80)
+                    .frame(width: Layout.volumeSlider)
                     .controlSize(.mini)
                 }
 
@@ -153,8 +74,8 @@ public struct QuickTimeHUDPanel: View {
 
                 if let name = channelName {
                     Text(name)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
+                        .font(.caption)
+                        .foregroundStyle(Palette.hudInk.opacity(0.7))
                         .lineLimit(1)
                 }
 
@@ -168,14 +89,13 @@ public struct QuickTimeHUDPanel: View {
                         Text("480p").tag(Double(1_500_000))
                     }
                     .pickerStyle(.menu)
-                    .frame(width: 64)
-                    .scaleEffect(0.85)
+                    .frame(width: Layout.bitrateMenu)
                 }
 
                 if let detach = onDetachPlayer {
                     Button(action: detach) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.system(size: 15))
+                            .font(.system(size: Layout.hudIcon))
                     }
                     .buttonStyle(.plain)
                     .help("Смотреть в отдельном окне")
@@ -184,7 +104,7 @@ public struct QuickTimeHUDPanel: View {
                 if let fullscreen = onToggleFullscreen {
                     Button(action: fullscreen) {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 15))
+                            .font(.system(size: Layout.hudIcon))
                     }
                     .buttonStyle(.plain)
                     .help("Во весь экран")
@@ -193,26 +113,26 @@ public struct QuickTimeHUDPanel: View {
                 if let fav = onToggleFavorite {
                     Button(action: fav) {
                         Image(systemName: isFavorite ? "heart.fill" : "heart")
-                            .font(.system(size: 15))
-                            .foregroundColor(isFavorite ? .pink : nil)
+                            .font(.system(size: Layout.hudIcon))
+                            .foregroundStyle(isFavorite ? Palette.favorite : Palette.hudInk)
                     }
                     .buttonStyle(.plain)
                     .help(isFavorite ? "Удалить из избранного" : "Добавить в избранное")
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, Spacing.l)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, Spacing.l)
         .background(
             VisualEffectView(material: .hudWindow, blendingMode: .withinWindow)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: Radius.hud))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: Radius.hud)
+                        .stroke(Palette.hudInk.opacity(0.15), lineWidth: Layout.hairline)
                 )
         )
-        .padding(.horizontal, 20)
-        .padding(.bottom, 20)
+        .padding(.horizontal, Spacing.xxl)
+        .padding(.bottom, Spacing.xxl)
         .onAppear { setupTimeObserver() }
         .onDisappear { removeTimeObserver() }
     }
@@ -220,52 +140,50 @@ public struct QuickTimeHUDPanel: View {
     // MARK: - Timeline
 
     private var timelineView: some View {
-        VStack(spacing: 4) {
-            if isLiveStream {
-                HStack(spacing: 6) {
+        VStack(spacing: Spacing.xs) {
+            if clock.isLiveStream {
+                HStack(spacing: Spacing.s) {
                     Circle()
-                        .fill(Color.red)
-                        .frame(width: 6, height: 6)
+                        .fill(Palette.live)
+                        .frame(width: Spacing.s, height: Spacing.s)
                     Text("LIVE")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.7))
+                        .font(.caption2.weight(.bold).monospaced())
+                        .foregroundStyle(Palette.hudInk.opacity(0.7))
                     Spacer()
-                    Text(formatTime(currentTime))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.5))
+                    Text(formatTime(clock.currentTime))
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(Palette.hudInk.opacity(0.5))
                 }
             } else {
                 Slider(
                     value: Binding(
-                        get: { currentTime },
+                        get: { clock.currentTime },
                         set: { newValue in
-                            currentTime = newValue
+                            clock.currentTime = newValue
                             let cmTime = CMTime(seconds: newValue, preferredTimescale: 600)
                             player.seek(to: cmTime)
                         }
                     ),
-                    in: 0...max(duration, 1),
-                    onEditingChanged: { editing in isSeeking = editing }
+                    in: 0...max(clock.duration, 1),
+                    onEditingChanged: { editing in clock.isSeeking = editing }
                 )
                 .controlSize(.mini)
-                .tint(.white)
+                .tint(Palette.hudInk)
 
                 HStack {
-                    Text(formatTime(currentTime))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.5))
+                    Text(formatTime(clock.currentTime))
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(Palette.hudInk.opacity(0.5))
                     Spacer()
-                    Text(formatTime(duration - currentTime))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.5))
+                    Text(formatTime(clock.duration - clock.currentTime))
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(Palette.hudInk.opacity(0.5))
                 }
             }
         }
     }
 
     // MARK: - Helpers
-
-    private var isPlaying: Bool { player.rate > 0 }
 
     private var volumeIcon: String {
         if volume == 0 { return "speaker.slash.fill" }
@@ -274,38 +192,16 @@ public struct QuickTimeHUDPanel: View {
         return "speaker.wave.3.fill"
     }
 
-    private func togglePlayPause() {
-        if player.rate > 0 {
-            player.pause()
-        } else if player.currentItem != nil {
-            player.play()
-        }
-    }
-
     private func setupTimeObserver() {
         removeTimeObserver()
         // 1s base interval (was 0.5s); live streams further throttle @State writes
         let interval = CMTime(seconds: 1.0, preferredTimescale: 600)
+        let playerRef = player
+        let clock = clock
         let token = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
-            guard !isSeeking else { return }
-
             let seconds = time.seconds
-            guard seconds.isFinite else { return }
-            if let item = player.currentItem {
-                let dur = item.duration.seconds
-                let live = !(dur.isFinite && dur > 0)
-                if live != isLiveStream {
-                    isLiveStream = live
-                }
-                if !live {
-                    duration = dur
-                    currentTime = seconds
-                } else if !lastLiveUIUpdate.isFinite || seconds - lastLiveUIUpdate >= 2.0 {
-                    lastLiveUIUpdate = seconds
-                    currentTime = seconds
-                }
-            } else {
-                currentTime = seconds
+            MainActor.assumeIsolated {
+                clock.apply(seconds: seconds, itemDuration: playerRef.currentItem?.duration.seconds)
             }
         }
         timeObserverToken = token
@@ -321,82 +217,6 @@ public struct QuickTimeHUDPanel: View {
 
     private func formatTime(_ seconds: Double) -> String {
         PlaybackClock.format(seconds)
-    }
-}
-
-public enum PlaybackClock {
-    public static func format(_ seconds: Double) -> String {
-        guard seconds.isFinite else { return "0:00" }
-        let total = Int(max(0, seconds))
-        let h = total / 3600
-        let m = (total % 3600) / 60
-        let s = total % 60
-        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
-        return String(format: "%d:%02d", m, s)
-    }
-}
-
-// MARK: - QuickTimeVideoContainer
-
-/// Безрамочный контейнер: видео-холст + авто-скрывающийся HUD поверх.
-public struct QuickTimeVideoContainer: View {
-    let player: AVPlayer
-    let playerState: PlayerState
-    let channelName: String?
-    let isFavorite: Bool
-
-    var onToggleFullscreen: (() -> Void)?
-    var onDetachPlayer: (() -> Void)?
-    var onToggleFavorite: (() -> Void)?
-    var onRetry: (() -> Void)?
-    var preferredBitrate: Binding<Double>?
-
-    @State private var hudVisible: Bool = true
-
-    public init(
-        player: AVPlayer,
-        playerState: PlayerState,
-        channelName: String? = nil,
-        isFavorite: Bool = false,
-        onToggleFullscreen: (() -> Void)? = nil,
-        onDetachPlayer: (() -> Void)? = nil,
-        onToggleFavorite: (() -> Void)? = nil,
-        onRetry: (() -> Void)? = nil,
-        preferredBitrate: Binding<Double>? = nil
-    ) {
-        self.player = player
-        self.playerState = playerState
-        self.channelName = channelName
-        self.isFavorite = isFavorite
-        self.onToggleFullscreen = onToggleFullscreen
-        self.onDetachPlayer = onDetachPlayer
-        self.onToggleFavorite = onToggleFavorite
-        self.onRetry = onRetry
-        self.preferredBitrate = preferredBitrate
-    }
-
-    public var body: some View {
-        ZStack {
-            VideoPlayerView(player: player)
-
-            // Буферизация / ошибки (+ retry)
-            PlayerHUDOverlay(state: playerState, onRetry: onRetry)
-
-            // QuickTime HUD при воспроизведении
-            if case .playing = playerState {
-                QuickTimeHUDPanel(
-                    player: player,
-                    channelName: channelName,
-                    isFavorite: isFavorite,
-                    onToggleFullscreen: onToggleFullscreen,
-                    onDetachPlayer: onDetachPlayer,
-                    onToggleFavorite: onToggleFavorite,
-                    preferredBitrate: preferredBitrate
-                )
-                .autoHideHUD(isVisible: $hudVisible)
-                .frame(maxHeight: .infinity, alignment: .bottom)
-            }
-        }
     }
 }
 

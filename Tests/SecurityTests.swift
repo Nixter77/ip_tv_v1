@@ -1,6 +1,30 @@
 import XCTest
 @testable import IPTVPlayer
 
+private final class ChunkedOversizeProtocol: URLProtocol {
+    nonisolated(unsafe) static var finished = false
+    nonisolated(unsafe) static var stopped = false
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.path.hasSuffix("/channels.json") == true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: [:])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(repeating: 0x41, count: 20))
+        client?.urlProtocol(self, didLoad: Data(repeating: 0x42, count: 20))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {
+        Self.stopped = true
+    }
+}
+
 final class SecurityTests: XCTestCase {
 
     func test_maskedUrlString_masksCredentials() {
@@ -187,7 +211,11 @@ final class SecurityTests: XCTestCase {
             _ = try await client.data(for: url, maxBytes: 1_024, kind: .remoteAsset)
             XCTFail("oversized body must be rejected")
         } catch let error as SafeHTTPError {
-            XCTAssertEqual(error, .tooLarge)
+            if case .tooLarge(let seen) = error {
+                XCTAssertGreaterThan(seen, 1_024)
+            } else {
+                XCTFail("expected tooLarge, got \(error)")
+            }
         } catch {
             XCTFail("unexpected \(error)")
         }
@@ -297,6 +325,123 @@ final class SecurityTests: XCTestCase {
             XCTFail("unexpected \(error)")
         }
         URLProtocolMock.mockData.removeAll()
+    }
+
+    func test_repository_abortsOversizeBodyWithoutContentLength() async {
+        ChunkedOversizeProtocol.finished = false
+        ChunkedOversizeProtocol.stopped = false
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ChunkedOversizeProtocol.self, URLProtocolMock.self]
+        let session = URLSession(configuration: config)
+        let repo = IPTVRepository(session: session, diskCache: nil, maxAttempts: 3, maxResponseBytes: 32)
+        for name in ["logos", "feeds"] {
+            let extra = URL(string: "https://iptv-org.github.io/api/\(name).json")!
+            URLProtocolMock.mockData[extra] = (
+                Data("[]".utf8),
+                HTTPURLResponse(url: extra, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                nil
+            )
+        }
+
+        do {
+            _ = try await repo.fetchChannels(options: .forceNetwork)
+            XCTFail("oversize body without Content-Length must abort")
+        } catch let error as PlaylistFetchError {
+            if case .payloadTooLarge(_, let count) = error {
+                XCTAssertEqual(count, 40)
+            } else {
+                XCTFail("expected payloadTooLarge, got \(error)")
+            }
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+        XCTAssertTrue(ChunkedOversizeProtocol.stopped)
+        XCTAssertFalse(ChunkedOversizeProtocol.finished)
+    }
+
+    func test_repository_rejectsBodyLargerThanDeclaredContentLength() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolMock.self]
+        let session = URLSession(configuration: config)
+        let repo = IPTVRepository(session: session, diskCache: nil, maxAttempts: 1, maxResponseBytes: 32)
+        let url = URL(string: "https://iptv-org.github.io/api/channels.json")!
+        URLProtocolMock.mockData[url] = (
+            Data(repeating: 0x41, count: 64),
+            HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Length": "8"])!,
+            nil
+        )
+        do {
+            _ = try await repo.fetchChannels(options: .forceNetwork)
+            XCTFail("lying Content-Length must still abort")
+        } catch let error as PlaylistFetchError {
+            if case .payloadTooLarge(_, let count) = error {
+                XCTAssertEqual(count, 64)
+            } else {
+                XCTFail("expected payloadTooLarge, got \(error)")
+            }
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+        URLProtocolMock.mockData.removeAll()
+    }
+
+    func test_repository_rejectsHTMLBeforeDecodeAndCache() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolMock.self]
+        let session = URLSession(configuration: config)
+        let cacheDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iptv-html-\(UUID().uuidString)", isDirectory: true)
+        let cache = PlaylistDiskCache(directory: cacheDir, ttl: 6 * 3600)
+        let repo = IPTVRepository(session: session, diskCache: cache, maxAttempts: 3)
+        let url = URL(string: "https://iptv-org.github.io/api/channels.json")!
+        let body = Data(#"[{"id":"html.us","name":"Should Not Decode"}]"#.utf8)
+        URLProtocolMock.mockData[url] = (
+            body,
+            HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "text/html; charset=utf-8"]
+            )!,
+            nil
+        )
+        do {
+            _ = try await repo.fetchChannels(options: .forceNetwork)
+            XCTFail("text/html must not decode")
+        } catch let error as PlaylistFetchError {
+            if case .unacceptableContent = error {
+            } else {
+                XCTFail("expected unacceptableContent, got \(error)")
+            }
+        }
+        let cached = cacheDir.appendingPathComponent("channels.json")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cached.path))
+        URLProtocolMock.mockData.removeAll()
+        try? FileManager.default.removeItem(at: cacheDir)
+    }
+
+    func test_repository_doesNotRetryTooLarge() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolMock.self]
+        let session = URLSession(configuration: config)
+        let repo = IPTVRepository(session: session, diskCache: nil, maxAttempts: 3, maxResponseBytes: 32)
+        let url = URL(string: "https://iptv-org.github.io/api/channels.json")!
+        URLProtocolMock.resetStartCounts()
+        URLProtocolMock.mockData[url] = (
+            Data(repeating: 0x41, count: 64),
+            HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+            nil
+        )
+        do {
+            _ = try await repo.fetchChannels(options: .forceNetwork)
+            XCTFail("expected tooLarge")
+        } catch is PlaylistFetchError {
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+        XCTAssertEqual(URLProtocolMock.startCount(for: url), 1)
+        URLProtocolMock.mockData.removeAll()
+        URLProtocolMock.resetStartCounts()
     }
 
     func test_playbackClock_nanDoesNotTrap() {

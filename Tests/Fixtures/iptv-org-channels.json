@@ -1,0 +1,153 @@
+[
+  {
+    "id": "002RadioTV.do",
+    "name": "002 Radio TV",
+    "alt_names": [],
+    "network": null,
+    "owners": [],
+    "country": "DO",
+    "categories": [
+      "general"
+    ],
+    "is_nsfw": false,
+    "launched": null,
+    "closed": null,
+    "replaced_by": null,
+    "website": "https://www.002radio.com/"
+  },
+  {
+    "id": "1000xHoraTV.uy",
+    "name": "1000xHora TV",
+    "alt_names": [],
+    "network": null,
+    "owners": [
+      "Omar Toledo"
+    ],
+    "country": "UY",
+    "categories": [
+      "auto"
+    ],
+    "is_nsfw": false,
+    "launched": null,
+    "closed": "2026-06-19",
+    "replaced_by": null,
+    "website": "https://www.1000xhoratv.com/"
+  },
+  {
+    "id": "21Sextury.us",
+    "name": "21 Sextury",
+    "alt_names": [],
+    "network": null,
+    "owners": [
+      "Gamma Billing Inc"
+    ],
+    "country": "US",
+    "categories": [
+      "xxx"
+    ],
+    "is_nsfw": true,
+    "launched": null,
+    "closed": null,
+    "replaced_by": null,
+    "website": "https://www.21sextury.com/"
+  },
+  {
+    "id": "24Doc.ru",
+    "name": "24 Doc",
+    "alt_names": [
+      "24 Док"
+    ],
+    "network": null,
+    "owners": [
+      "VGTRK"
+    ],
+    "country": "RU",
+    "categories": [
+      "documentary"
+    ],
+    "is_nsfw": false,
+    "launched": "2005-01-11",
+    "closed": "2017-07-01",
+    "replaced_by": "Doctor.ru",
+    "website": null
+  },
+  {
+    "id": "10Bold.au",
+    "name": "10 Bold",
+    "alt_names": [
+      "10 Boss",
+      "One",
+      "One HD"
+    ],
+    "network": "Network 10",
+    "owners": [
+      "Ten Network Holdings Ltd"
+    ],
+    "country": "AU",
+    "categories": [
+      "lifestyle",
+      "relax"
+    ],
+    "is_nsfw": false,
+    "launched": "2009-03-26",
+    "closed": null,
+    "replaced_by": null,
+    "website": "http://tenplay.com.au/"
+  },
+  {
+    "id": "123tv.de",
+    "name": "1-2-3.tv",
+    "alt_names": [],
+    "network": null,
+    "owners": [],
+    "country": "DE",
+    "categories": [
+      "shop"
+    ],
+    "is_nsfw": false,
+    "launched": "2020-01-01",
+    "closed": "2026-04-28",
+    "replaced_by": "123live.de",
+    "website": "https://www.1-2-3.tv/"
+  },
+  {
+    "id": "2MMonde.ma",
+    "name": "2M Monde",
+    "alt_names": [
+      "2M International"
+    ],
+    "network": "2M",
+    "owners": [
+      "Bank of Africa"
+    ],
+    "country": "MA",
+    "categories": [
+      "general"
+    ],
+    "is_nsfw": false,
+    "launched": "1989-03-04",
+    "closed": null,
+    "replaced_by": null,
+    "website": "https://2m.ma/"
+  },
+  {
+    "id": "1Plus1International.ua",
+    "name": "1+1 International",
+    "alt_names": [
+      "1+1 Інтернешнл"
+    ],
+    "network": null,
+    "owners": [
+      "1+1 Media Group"
+    ],
+    "country": "UA",
+    "categories": [
+      "general"
+    ],
+    "is_nsfw": false,
+    "launched": "2006-03-01",
+    "closed": null,
+    "replaced_by": null,
+    "website": "https://1plus1.international/"
+  }
+]

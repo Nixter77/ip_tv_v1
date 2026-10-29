@@ -12,6 +12,7 @@ public enum PlaylistFetchError: Error, LocalizedError, Sendable {
     case decodingFailed(endpoint: String, underlying: String)
     case noData
     case payloadTooLarge(endpoint: String, byteCount: Int)
+    case unacceptableContent(endpoint: String)
 
     public var errorDescription: String? {
         switch self {
@@ -27,6 +28,8 @@ public enum PlaylistFetchError: Error, LocalizedError, Sendable {
             return "Нет данных плейлиста"
         case .payloadTooLarge(_, let byteCount):
             return "Ответ плейлиста слишком большой (\(byteCount) байт)"
+        case .unacceptableContent:
+            return "Сервер вернул страницу вместо плейлиста"
         }
     }
 
@@ -49,6 +52,8 @@ public enum PlaylistFetchError: Error, LocalizedError, Sendable {
             return "Нет данных плейлиста."
         case .payloadTooLarge:
             return "Сервер вернул слишком большой плейлист."
+        case .unacceptableContent:
+            return "Сервер вернул страницу вместо данных плейлиста."
         }
     }
 }
@@ -75,10 +80,21 @@ private struct PlaylistCacheMeta: Codable, Sendable {
     var contentLength: Int
 }
 
+private final class CacheGate: @unchecked Sendable {
+    private let lock = NSLock()
+
+    func sync<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+}
+
 /// Дисковый кэш JSON API (отдельно от URLCache логотипов)
 public struct PlaylistDiskCache: Sendable {
     public let directory: URL
     public let ttl: TimeInterval
+    private let gate = CacheGate()
 
     public init(directory: URL, ttl: TimeInterval = 6 * 60 * 60) {
         self.directory = directory
@@ -94,15 +110,17 @@ public struct PlaylistDiskCache: Sendable {
     }
 
     fileprivate func ensureDirectory() throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try gate.sync {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var dir = directory
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? dir.setResourceValues(values)
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o700],
-            ofItemAtPath: directory.path
-        )
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: directory.path
+            )
+        }
     }
 
     fileprivate func dataURL(for key: String) -> URL {
@@ -114,13 +132,17 @@ public struct PlaylistDiskCache: Sendable {
     }
 
     fileprivate func loadMeta(for key: String) -> PlaylistCacheMeta? {
-        let url = metaURL(for: key)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(PlaylistCacheMeta.self, from: data)
+        gate.sync {
+            let url = metaURL(for: key)
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? JSONDecoder().decode(PlaylistCacheMeta.self, from: data)
+        }
     }
 
     fileprivate func loadData(for key: String) -> Data? {
-        try? Data(contentsOf: dataURL(for: key))
+        gate.sync {
+            try? Data(contentsOf: dataURL(for: key))
+        }
     }
 
     fileprivate func isFresh(_ meta: PlaylistCacheMeta) -> Bool {
@@ -128,31 +150,47 @@ public struct PlaylistDiskCache: Sendable {
     }
 
     fileprivate func save(key: String, data: Data, etag: String?, lastModified: String?) throws {
-        try ensureDirectory()
-        try data.write(to: dataURL(for: key), options: .atomic)
+        try gate.sync {
+            try ensureDirectoryUnlocked()
+            try data.write(to: dataURL(for: key), options: .atomic)
         let meta = PlaylistCacheMeta(
             fetchedAt: Date(),
             etag: RemoteURLPolicy.sanitizedHTTPHeaderValue(etag),
             lastModified: RemoteURLPolicy.sanitizedHTTPHeaderValue(lastModified),
             contentLength: data.count
         )
-        let metaData = try JSONEncoder().encode(meta)
-        try metaData.write(to: metaURL(for: key), options: .atomic)
+            let metaData = try JSONEncoder().encode(meta)
+            try metaData.write(to: metaURL(for: key), options: .atomic)
+        }
     }
 
     fileprivate func remove(key: String) {
-        try? FileManager.default.removeItem(at: dataURL(for: key))
-        try? FileManager.default.removeItem(at: metaURL(for: key))
+        gate.sync {
+            try? FileManager.default.removeItem(at: dataURL(for: key))
+            try? FileManager.default.removeItem(at: metaURL(for: key))
+        }
+    }
+
+    private func ensureDirectoryUnlocked() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var dir = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? dir.setResourceValues(values)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: directory.path
+        )
     }
 }
 
 /// Data adapter: iptv-org HTTP + disk cache → Domain entities (via DTOs).
-public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
-    private let session: URLSession
+public actor IPTVRepository: PlaylistRepository {
+    private let http: SafeHTTPClient
     private let diskCache: PlaylistDiskCache?
     private let maxAttempts: Int
     private let maxResponseBytes: Int
-    private let cacheLock = NSLock()
+    private let clock: any SuspendingClock
 
     /// Сессия по умолчанию с жёсткими таймаутами (не .shared)
     public static func makeDefaultSession() -> URLSession {
@@ -164,12 +202,14 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
         return URLSession(configuration: config)
     }
 
-    private enum Endpoint: String {
+    private enum Endpoint: String, Sendable {
         case channels
         case streams
         case categories
         case countries
         case languages
+        case logos
+        case feeds
 
         var urlString: String {
             "https://iptv-org.github.io/api/\(rawValue).json"
@@ -187,29 +227,37 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
         session: URLSession = IPTVRepository.makeDefaultSession(),
         diskCache: PlaylistDiskCache? = .applicationDefault,
         maxAttempts: Int = 3,
-        maxResponseBytes: Int = RemoteURLPolicy.maxPlaylistBytes
+        maxResponseBytes: Int = RemoteURLPolicy.maxPlaylistBytes,
+        clock: any SuspendingClock = ContinuousSuspendingClock()
     ) {
-        self.session = session
+        self.http = SafeHTTPClient(configuration: session.configuration)
         self.diskCache = diskCache
         self.maxAttempts = max(1, maxAttempts)
         self.maxResponseBytes = max(1, maxResponseBytes)
+        self.clock = clock
     }
 
     private func withCacheLock<T>(_ body: (PlaylistDiskCache) throws -> T) rethrows -> T? {
         guard let diskCache else { return nil }
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
         return try body(diskCache)
     }
 
     private func rejectIfTooLarge(_ data: Data, endpoint: Endpoint) throws {
+        try Self.rejectIfTooLarge(data, endpoint: endpoint, maxResponseBytes: maxResponseBytes)
+    }
+
+    private static func rejectIfTooLarge(_ data: Data, endpoint: Endpoint, maxResponseBytes: Int) throws {
         if data.count > maxResponseBytes {
             throw PlaylistFetchError.payloadTooLarge(endpoint: endpoint.rawValue, byteCount: data.count)
         }
     }
 
-    private func decodeArray<T: Decodable>(from data: Data, endpoint: Endpoint) throws -> [T] {
-        try rejectIfTooLarge(data, endpoint: endpoint)
+    private static func decodeArray<T: Decodable>(
+        from data: Data,
+        endpoint: Endpoint,
+        maxResponseBytes: Int
+    ) throws -> [T] {
+        try rejectIfTooLarge(data, endpoint: endpoint, maxResponseBytes: maxResponseBytes)
         let decoder = JSONDecoder()
         do {
             let items = try decoder.decode([T].self, from: data)
@@ -230,11 +278,11 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                             underlying: "skipped \(skipped)/\(safeElements.count) items"
                         )
                     }
-                    #if DEBUG
                     if ratio > 0.3 {
-                        print("Playlist \(endpoint.rawValue): skipped \(skipped)/\(safeElements.count) items (\(Int(ratio * 100))%)")
+                        AppLog.catalog.error(
+                            "Playlist \(endpoint.rawValue, privacy: .public) skipped \(skipped, privacy: .public)/\(safeElements.count, privacy: .public)"
+                        )
                     }
-                    #endif
                 }
                 try validatePayload(items, data: data, endpoint: endpoint)
                 return items
@@ -249,7 +297,7 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
         }
     }
 
-    private func validatePayload<T>(_ items: [T], data: Data, endpoint: Endpoint) throws {
+    private static func validatePayload<T>(_ items: [T], data: Data, endpoint: Endpoint) throws {
         if endpoint.rejectsEmptyLargePayload, items.isEmpty, data.count > 256 {
             throw PlaylistFetchError.emptyPayload(endpoint: endpoint.rawValue, byteCount: data.count)
         }
@@ -270,30 +318,31 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
         }
     }
 
-    /// Retry с exponential backoff + jitter. Cancellation never retried.
+    /// Retry с exponential backoff + jitter. `tooLarge` and cancellation are never retried.
     private func dataWithRetry(for request: URLRequest, endpoint: Endpoint) async throws -> (Data, URLResponse) {
-        var delayNs: UInt64 = 200_000_000 // 0.2s
+        var delayMs = 200
         var lastError: Error = PlaylistFetchError.noData
 
         for attempt in 0..<maxAttempts {
             try Task.checkCancellation()
             do {
-                let (data, response) = try await session.data(for: request)
-                if let http = response as? HTTPURLResponse {
-                    if let lengthString = http.value(forHTTPHeaderField: "Content-Length"),
-                       let length = Int(lengthString), length > maxResponseBytes {
-                        throw PlaylistFetchError.payloadTooLarge(endpoint: endpoint.rawValue, byteCount: length)
-                    }
+                let (data, response) = try await http.data(
+                    for: request,
+                    maxBytes: maxResponseBytes,
+                    kind: .remoteAsset
+                )
+                if Self.isHTML(response) {
+                    throw PlaylistFetchError.unacceptableContent(endpoint: endpoint.rawValue)
                 }
                 try rejectIfTooLarge(data, endpoint: endpoint)
-                if let http = response as? HTTPURLResponse {
-                    if isRetriableHTTP(http.statusCode), attempt < maxAttempts - 1 {
-                        try await Task.sleep(nanoseconds: delayNs + UInt64.random(in: 0...50_000_000))
-                        delayNs = min(delayNs * 2, 2_000_000_000)
+                if let httpResponse = response as? HTTPURLResponse {
+                    if isRetriableHTTP(httpResponse.statusCode), attempt < maxAttempts - 1 {
+                        try await clock.sleep(for: .milliseconds(delayMs + Int.random(in: 0...50)))
+                        delayMs = min(delayMs * 2, 2_000)
                         continue
                     }
-                    if http.statusCode != 200 && http.statusCode != 304 {
-                        throw PlaylistFetchError.httpStatus(endpoint: endpoint.rawValue, statusCode: http.statusCode)
+                    if httpResponse.statusCode != 200 && httpResponse.statusCode != 304 {
+                        throw PlaylistFetchError.httpStatus(endpoint: endpoint.rawValue, statusCode: httpResponse.statusCode)
                     }
                 }
                 return (data, response)
@@ -301,21 +350,32 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
                 throw CancellationError()
             } catch let error as PlaylistFetchError {
                 throw error
+            } catch let error as SafeHTTPError {
+                switch error {
+                case .tooLarge(let bytesSeen):
+                    throw PlaylistFetchError.payloadTooLarge(endpoint: endpoint.rawValue, byteCount: bytesSeen)
+                case .blockedURL:
+                    throw PlaylistFetchError.badURL(endpoint: endpoint.rawValue)
+                case .noResponse:
+                    throw PlaylistFetchError.noData
+                }
             } catch let error as URLError {
+                if error.code == .cancelled {
+                    throw CancellationError()
+                }
                 lastError = error
                 if isRetriableURLError(error), attempt < maxAttempts - 1 {
-                    try await Task.sleep(nanoseconds: delayNs + UInt64.random(in: 0...50_000_000))
-                    delayNs = min(delayNs * 2, 2_000_000_000)
+                    try await clock.sleep(for: .milliseconds(delayMs + Int.random(in: 0...50)))
+                    delayMs = min(delayMs * 2, 2_000)
                     continue
                 }
                 throw error
             } catch {
-                // Do not retry cancellation-like cooperative cancels mis-typed as other errors
                 if error is CancellationError { throw error }
                 lastError = error
                 if attempt < maxAttempts - 1 {
-                    try await Task.sleep(nanoseconds: delayNs + UInt64.random(in: 0...50_000_000))
-                    delayNs = min(delayNs * 2, 2_000_000_000)
+                    try await clock.sleep(for: .milliseconds(delayMs + Int.random(in: 0...50)))
+                    delayMs = min(delayMs * 2, 2_000)
                     continue
                 }
                 throw error
@@ -324,21 +384,29 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
         throw lastError
     }
 
-    /// Disk I/O + JSON decode hop off the caller's executor (Swift 5.9 inherits MainActor).
+    private static func isHTML(_ response: URLResponse) -> Bool {
+        let header = (response as? HTTPURLResponse)?
+            .value(forHTTPHeaderField: "Content-Type")?
+            .lowercased() ?? ""
+        let mime = response.mimeType?.lowercased() ?? ""
+        return header.contains("text/html") || mime.contains("html")
+    }
+
+    /// Disk I/O + JSON decode hop off the caller's executor.
     private func decodeArrayOffMain<T: Decodable & Sendable>(
         from data: Data,
         endpoint: Endpoint
     ) async throws -> [T] {
-        try await Task.detached(priority: .userInitiated) {
-            try self.decodeArray(from: data, endpoint: endpoint)
+        let limit = maxResponseBytes
+        return try await Task.detached(priority: .userInitiated) {
+            try Self.decodeArray(from: data, endpoint: endpoint, maxResponseBytes: limit)
         }.value
     }
 
     private func loadCacheSnapshot(key: String) async -> (meta: PlaylistCacheMeta?, data: Data?) {
-        await Task.detached(priority: .utility) {
-            let meta = self.withCacheLock { $0.loadMeta(for: key) } ?? nil
-            let data = self.withCacheLock { $0.loadData(for: key) } ?? nil
-            return (meta, data)
+        guard let cache = diskCache else { return (nil, nil) }
+        return await Task.detached(priority: .utility) {
+            (cache.loadMeta(for: key), cache.loadData(for: key))
         }.value
     }
 
@@ -453,11 +521,14 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
     }
 
     public func fetchChannels(options: CatalogFetchOptions) async throws -> [Channel] {
+        // Logos and feeds first so the channels request stays the last one observers see.
+        let logos: [LogoDTO] = try await fetchSupplemental(endpoint: .logos, forceNetwork: options.forceNetwork)
+        let feeds: [FeedDTO] = try await fetchSupplemental(endpoint: .feeds, forceNetwork: options.forceNetwork)
         let dtos: [ChannelDTO] = try await fetchAndDecodeSafeArray(
             endpoint: .channels,
             forceNetwork: options.forceNetwork
         )
-        return dtos.map { $0.toDomain() }
+        return CatalogAssembler.channels(from: dtos, logos: logos, feeds: feeds)
     }
 
     public func fetchStreams(options: CatalogFetchOptions) async throws -> [Stream] {
@@ -465,7 +536,24 @@ public final class IPTVRepository: PlaylistRepository, @unchecked Sendable {
             endpoint: .streams,
             forceNetwork: options.forceNetwork
         )
-        return dtos.map { $0.toDomain() }
+        return dtos.compactMap { $0.toDomain() }
+    }
+
+    /// Soft-fail for logos/feeds. Cancellation still escapes.
+    private func fetchSupplemental<T: Decodable & Sendable>(
+        endpoint: Endpoint,
+        forceNetwork: Bool
+    ) async throws -> [T] {
+        do {
+            return try await fetchAndDecodeSafeArray(endpoint: endpoint, forceNetwork: forceNetwork)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            AppLog.network.error(
+                "Supplemental \(endpoint.rawValue, privacy: .public) unavailable: \(AppLog.safe(error.localizedDescription), privacy: .public)"
+            )
+            return []
+        }
     }
 
     public func fetchCategories(options: CatalogFetchOptions) async throws -> [Category] {

@@ -9,12 +9,12 @@ public final class SwiftDataUserLibraryRepository: UserLibraryRepository {
     private let modelContext: ModelContext
     private let historyLimit: Int
 
-    public init(modelContext: ModelContext, historyLimit: Int = 50) {
+    public init(modelContext: ModelContext, historyLimit: Int = LibraryPolicy.historyLimit) {
         self.modelContext = modelContext
         self.historyLimit = historyLimit
     }
 
-    public static func make(modelContainer: ModelContainer?, historyLimit: Int = 50) -> any UserLibraryRepository {
+    public static func make(modelContainer: ModelContainer?, historyLimit: Int = LibraryPolicy.historyLimit) -> any UserLibraryRepository {
         guard let context = modelContainer?.mainContext else {
             return InMemoryUserLibraryRepository()
         }

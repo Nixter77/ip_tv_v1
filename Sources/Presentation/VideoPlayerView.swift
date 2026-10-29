@@ -19,7 +19,12 @@ private class CleanAVPlayerView: AVPlayerView {
         
         // Зона кнопок управления окном (top-left corner)
         // Высота стандартного titlebar ~28-40pt, ширина под кнопки ~80pt
-        let trafficLightsZone = NSRect(x: 0, y: windowHeight - 40, width: 80, height: 40)
+        let trafficLightsZone = NSRect(
+            x: 0,
+            y: windowHeight - Layout.trafficHeight,
+            width: Layout.trafficWidth,
+            height: Layout.trafficHeight
+        )
         
         let isFullScreen = window.styleMask.contains(.fullScreen)
         

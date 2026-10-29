@@ -6,43 +6,50 @@ import Combine
 
 @MainActor
 final class AppViewModelTests: XCTestCase {
-    private var session: URLSession?
-    private var repository: IPTVRepository?
-    private var filterEngine: ChannelFilterEngine?
-    private var playerManager: PlayerStateManager?
-    private var viewModel: AppViewModel?
+    nonisolated(unsafe) private var session: URLSession?
+    nonisolated(unsafe) private var repository: IPTVRepository?
+    nonisolated(unsafe) private var filterEngine: ChannelFilterEngine?
+    nonisolated(unsafe) private var playerManager: PlayerStateManager?
+    nonisolated(unsafe) private var viewModel: AppViewModel?
+    nonisolated(unsafe) private var clock: ManualSuspendingClock?
 
     override func setUp() {
         super.setUp()
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [URLProtocolMock.self]
-        
+
         let newSession = URLSession(configuration: config)
         let newRepository = IPTVRepository(session: newSession, diskCache: nil)
         let newFilterEngine = ChannelFilterEngine()
-        let newPlayerManager = PlayerStateManager()
+        let newClock = ManualSuspendingClock()
+        let built = MainActor.assumeIsolated {
+            let newPlayerManager = PlayerStateManager()
+            let viewModel = AppViewModel(
+                repository: newRepository,
+                filterEngine: newFilterEngine,
+                playerManager: newPlayerManager,
+                clock: newClock
+            )
+            viewModel.searchQuery = ""
+            viewModel.selectedTab = .all
+            return (newPlayerManager, viewModel)
+        }
 
         session = newSession
         repository = newRepository
         filterEngine = newFilterEngine
-        playerManager = newPlayerManager
-        
-        viewModel = AppViewModel(
-            repository: newRepository,
-            filterEngine: newFilterEngine,
-            playerManager: newPlayerManager
-        )
-        
+        playerManager = built.0
+        clock = newClock
+        viewModel = built.1
+
         URLProtocolMock.mockData.removeAll()
-        // Clear stale test state from UserDefaults to ensure test isolation
         UserDefaults.standard.removeObject(forKey: "lastSearchQuery")
         UserDefaults.standard.removeObject(forKey: "lastSelectedTab")
-        viewModel?.searchQuery = ""
-        viewModel?.selectedTab = .all
     }
 
     override func tearDown() {
         viewModel = nil
+        clock = nil
         playerManager = nil
         filterEngine = nil
         repository = nil
@@ -118,10 +125,7 @@ final class AppViewModelTests: XCTestCase {
         
         // Меняем строку поиска на несуществующую
         vm.searchQuery = "nonexistent"
-        
-        // Ждем прогона Combine debounce (300мс) + запас
-        try? await Task.sleep(nanoseconds: 400_000_000)
-        
+        await flushDebounce(try XCTUnwrap(clock))
         XCTAssertEqual(vm.filteredChannels.count, 0)
     }
 
@@ -154,6 +158,71 @@ final class AppViewModelTests: XCTestCase {
         
         let streams = await engine.streams(for: channel.id)
         XCTAssertEqual(player.state, .loading(stream: streams.first!))
+    }
+
+    func test_favoriteName_usesCatalogNameWhenFilteredOut() async throws {
+        makeMockJSONData()
+        let library = NameRecordingLibrary()
+        let clock = ManualSuspendingClock()
+        let vm = AppViewModel(
+            repository: try XCTUnwrap(repository),
+            filterEngine: try XCTUnwrap(filterEngine),
+            playerManager: PlayerStateManager(),
+            userLibrary: library,
+            libraryAvailable: true,
+            clock: clock
+        )
+        await vm.loadData()
+        vm.searchQuery = "zzzz-not-a-channel"
+        await flushDebounce(clock)
+        XCTAssertTrue(vm.filteredChannels.isEmpty)
+        vm.toggleFavorite(channelId: "cnn")
+        await vm.flushLibraryWrites()
+        XCTAssertEqual(library.recorded.first?.name, "CNN")
+    }
+
+    func test_reselectPlayingChannel_startsAnotherAttempt() async throws {
+        makeMockJSONData()
+        let vm = try XCTUnwrap(viewModel)
+        await vm.loadData()
+        let channel = try XCTUnwrap(vm.filteredChannels.first)
+        await vm.play(channel: channel)
+        let firstItem = vm.playerManager.avPlayer.currentItem
+        XCTAssertNotNil(firstItem)
+        await vm.selectChannel(channel)
+        XCTAssertFalse(firstItem === vm.playerManager.avPlayer.currentItem)
+    }
+}
+
+@MainActor
+private final class NameRecordingLibrary: UserLibraryRepository {
+    struct Record {
+        var id: String
+        var name: String
+        var isFavorite: Bool
+    }
+    var recorded: [Record] = []
+
+    func load() async throws -> UserLibraryState { UserLibraryState() }
+
+    func setFavorite(id: String, name: String, isFavorite: Bool) async throws {
+        recorded.append(Record(id: id, name: name, isFavorite: isFavorite))
+    }
+
+    func recordView(id: String, name: String) async throws {}
+}
+
+private func flushDebounce(_ clock: ManualSuspendingClock) async {
+    for _ in 0..<4 {
+        let baseline = clock.pendingCount
+        for _ in 0..<40 {
+            if clock.pendingCount > baseline { break }
+            await Task.yield()
+        }
+        await clock.advance(by: .milliseconds(300))
+        for _ in 0..<20 {
+            await Task.yield()
+        }
     }
 }
 

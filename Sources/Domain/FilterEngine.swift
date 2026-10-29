@@ -28,6 +28,27 @@ public protocol ChannelFilterEngineProtocol: Sendable {
     
     /// Каналы по ID с сохранением порядка (история просмотров)
     func channels(preservingOrder ids: [String]) async -> [Channel]
+
+    /// NSFW channels and channels with a closed date stay in the index and are hidden until enabled.
+    func setVisibility(includeNSFW: Bool, includeClosed: Bool) async
+
+    func groupCounts() async -> CatalogGroupCounts
+}
+
+public struct CatalogGroupCounts: Sendable, Equatable {
+    public var categories: [String: Int]
+    public var countries: [String: Int]
+    public var languages: [String: Int]
+
+    public init(
+        categories: [String: Int] = [:],
+        countries: [String: Int] = [:],
+        languages: [String: Int] = [:]
+    ) {
+        self.categories = categories
+        self.countries = countries
+        self.languages = languages
+    }
 }
 
 public extension ChannelFilterEngineProtocol {
@@ -81,8 +102,15 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
     private var allChannelsSorted: [Channel] = []
     /// Newer catalog loads win; stale cancelled setups do not replace the index.
     private var appliedGeneration: UInt64 = 0
+    private var includeNSFW = false
+    private var includeClosed = false
 
     public init() {}
+
+    public func setVisibility(includeNSFW: Bool, includeClosed: Bool) {
+        self.includeNSFW = includeNSFW
+        self.includeClosed = includeClosed
+    }
 
     /// Инициализация движка: индексы собираются в локальные структуры и атомарно подменяются в конце
     public func setup(channels: [Channel], streams: [Stream], generation: UInt64 = 0) async {
@@ -135,7 +163,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         // Сортируем токены один раз; после построения tokenSets словарь tokenIndex не храним
         let newSortedTokens = tokenIndex.keys.sorted()
         let newTokenSets = newSortedTokens.map { tokenIndex[$0] ?? [] }
-        let newAllSorted = newChannels.values.sorted { $0.name < $1.name }
+        let newAllSorted = newChannels.values.sorted(by: Self.localizedNameOrder)
 
         if generation > 0, generation < appliedGeneration {
             return
@@ -219,11 +247,21 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                     result.append(channel)
                 }
             }
-            result.sort { $0.name < $1.name }
+            result.sort(by: Self.localizedNameOrder)
             return result
         }
 
         return allChannelsSorted.filter { finalIds.contains($0.id) }
+    }
+
+    private static func localizedNameOrder(_ lhs: Channel, _ rhs: Channel) -> Bool {
+        lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+    }
+
+    private func isListed(_ channel: Channel) -> Bool {
+        if !includeNSFW && channel.isNSFW { return false }
+        if !includeClosed && channel.closed != nil { return false }
+        return true
     }
 
     /// Собирает ID, чьи name-токены начинаются с prefix; при наличии universe — только пересечение (дешевле на коротких префиксах).
@@ -264,7 +302,7 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
                          restrictedTo != nil
 
         if !hasFilters {
-            return allChannelsSorted
+            return allChannelsSorted.filter(isListed)
         }
 
         // Ограничение по ID (избранное и т.д.) — стартовое множество
@@ -311,10 +349,10 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         }
         
         guard let finalIds = resultSet else {
-            return allChannelsSorted
+            return allChannelsSorted.filter(isListed)
         }
         
-        return materialize(finalIds)
+        return materialize(finalIds).filter(isListed)
     }
 
     public func streams(for channelId: String) async -> [Stream] {
@@ -325,10 +363,29 @@ public actor ChannelFilterEngine: ChannelFilterEngineProtocol {
         var result: [Channel] = []
         result.reserveCapacity(ids.count)
         for id in ids {
-            if let channel = channels[id] {
+            if let channel = channels[id], isListed(channel) {
                 result.append(channel)
             }
         }
         return result
+    }
+
+    public func groupCounts() -> CatalogGroupCounts {
+        var categories: [String: Int] = [:]
+        var countries: [String: Int] = [:]
+        var languages: [String: Int] = [:]
+        for channel in allChannelsSorted where isListed(channel) {
+            for category in channel.categories {
+                let key = category.lowercased()
+                categories[key, default: 0] += 1
+            }
+            if let country = channel.country {
+                countries[country.uppercased(), default: 0] += 1
+            }
+            for language in channel.languages {
+                languages[language.lowercased(), default: 0] += 1
+            }
+        }
+        return CatalogGroupCounts(categories: categories, countries: countries, languages: languages)
     }
 }

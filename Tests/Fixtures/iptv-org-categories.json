@@ -1,0 +1,27 @@
+[
+  {
+    "id": "auto",
+    "name": "Auto",
+    "description": "Programming related to cars, motorcycles, and other automobiles"
+  },
+  {
+    "id": "documentary",
+    "name": "Documentary",
+    "description": "Programming that depicts a person or real-world event"
+  },
+  {
+    "id": "general",
+    "name": "General",
+    "description": "Provides a variety of different programming"
+  },
+  {
+    "id": "news",
+    "name": "News",
+    "description": "Programming is mostly news"
+  },
+  {
+    "id": "sports",
+    "name": "Sports",
+    "description": "Programming is sports"
+  }
+]

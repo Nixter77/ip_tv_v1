@@ -185,4 +185,60 @@ final class ChannelFilterEngineTests: XCTestCase {
         let ordered = await engine.channels(preservingOrder: ["c", "a", "missing", "b"])
         XCTAssertEqual(ordered.map(\.id), ["c", "a", "b"])
     }
+
+    func test_categoryFilter_matchesCategoryId() async {
+        let docs = makeChannel(id: "24doc", name: "24 Doc", categories: ["docs"])
+        let news = makeChannel(id: "cnn", name: "CNN", categories: ["news"])
+        await engine.setup(channels: [docs, news], streams: [docs, news].map { makeStream(channel: $0.id) })
+        let matched = await engine.filter(query: nil, category: "docs", country: nil, language: nil)
+        XCTAssertEqual(matched.map(\.id), ["24doc"])
+        let displayName = await engine.filter(query: nil, category: "documentary", country: nil, language: nil)
+        XCTAssertTrue(displayName.isEmpty)
+    }
+
+    func test_nsfwAndClosed_hiddenUntilEnabled() async {
+        let open = makeChannel(id: "open", name: "Open")
+        let adult = Channel(
+            id: "adult", name: "Adult", country: nil, languages: [], categories: [],
+            logo: nil, website: nil, isNSFW: true
+        )
+        let closed = Channel(
+            id: "closed", name: "Closed", country: nil, languages: [], categories: [],
+            logo: nil, website: nil, closed: "2026-06-19"
+        )
+        await engine.setup(
+            channels: [adult, closed, open],
+            streams: [adult, closed, open].map { makeStream(channel: $0.id) }
+        )
+        let hidden = await engine.filter(query: nil, category: nil, country: nil, language: nil)
+        XCTAssertEqual(hidden.map(\.id), ["open"])
+        await engine.setVisibility(includeNSFW: true, includeClosed: true)
+        let shown = await engine.filter(query: nil, category: nil, country: nil, language: nil)
+        XCTAssertEqual(Set(shown.map(\.id)), Set(["adult", "closed", "open"]))
+    }
+
+    func test_sort_usesLocalizedStandardCompare() async {
+        let channels = [
+            makeChannel(id: "z", name: "Zebra"),
+            makeChannel(id: "a", name: "apple")
+        ]
+        await engine.setup(channels: channels, streams: channels.map { makeStream(channel: $0.id) })
+        let listed = await engine.filter(query: nil, category: nil, country: nil, language: nil)
+        let expected = channels.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        XCTAssertEqual(listed.map(\.name), expected.map(\.name))
+        XCTAssertEqual(listed.map(\.name), ["apple", "Zebra"])
+    }
+
+    func test_missingStatusKept_errorStatusDropped() async {
+        let channel = makeChannel(id: "c", name: "C")
+        let missing = IPTVPlayer.Stream(
+            channel: "c", urlString: "http://example.com/a.m3u8",
+            status: nil, timeshift: nil, httpReferrer: nil
+        )
+        let broken = makeStream(channel: "c", status: "error")
+        await engine.setup(channels: [channel], streams: [missing, broken])
+        let streams = await engine.streams(for: "c")
+        XCTAssertEqual(streams.count, 1)
+        XCTAssertNil(streams.first?.status)
+    }
 }

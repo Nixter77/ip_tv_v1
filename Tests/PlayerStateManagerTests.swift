@@ -7,11 +7,12 @@ import AVFoundation
 @MainActor
 final class PlayerStateManagerTests: XCTestCase {
     private var manager: PlayerStateManager!
+    private var clock: ManualSuspendingClock!
 
     override func setUp() {
         super.setUp()
-        // Используем маленький таймаут 0.2 секунды для мгновенного выполнения тестов
-        manager = PlayerStateManager(timeoutInterval: 0.2)
+        clock = ManualSuspendingClock()
+        manager = PlayerStateManager(timeoutInterval: 0.2, clock: clock)
     }
 
     override func tearDown() {
@@ -49,14 +50,13 @@ final class PlayerStateManagerTests: XCTestCase {
         
         await manager.play(channel: channel, streams: [stream])
         
-        // В момент запуска состояние должно быть loading
         let stateAfterPlay = manager.state
         XCTAssertEqual(stateAfterPlay, .loading(stream: stream))
         
-        // Ждем 0.3 секунды (больше таймаута 0.2с)
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        await clock.waitUntilPending()
+        await clock.advance(by: .milliseconds(200))
+        await waitForFailedState()
         
-        // Состояние должно перейти в failed из-за таймаута
         let stateAfterTimeout = manager.state
         if case .failed(let failedStream, let error) = stateAfterTimeout {
             XCTAssertEqual(failedStream, stream)
@@ -69,16 +69,14 @@ final class PlayerStateManagerTests: XCTestCase {
     /// Тест: автоматический переход на следующий поток, если первый мертв
     func test_automaticFallbackToNextStream() async {
         // Создаем локальный менеджер с увеличенным таймаутом 1.0 секунда для предотвращения временных гонок
-        let localManager = PlayerStateManager(timeoutInterval: 1.0)
+        let localClock = ManualSuspendingClock()
+        let localManager = PlayerStateManager(timeoutInterval: 1.0, clock: localClock)
         let channel = makeChannel(id: "fallback-channel", name: "Fallback Channel")
         // Первый поток мертв (мгновенно падает из-за некорректной схемы), второй поток зависает (таймаут)
         let stream1 = makeStream(channel: "fallback-channel", urlString: "invalid_url_scheme://live")
         let stream2 = makeStream(channel: "fallback-channel", urlString: "http://10.255.255.1/stream.m3u8")
         
         await localManager.play(channel: channel, streams: [stream1, stream2])
-        
-        // Ждем 0.1 секунды, чтобы первый поток успел упасть, и менеджер переключился на второй
-        try? await Task.sleep(nanoseconds: 100_000_000)
         
         // Должен произойти авто-переход на stream2, состояние должно быть .loading(stream2)
         let currentState = localManager.state
@@ -92,9 +90,6 @@ final class PlayerStateManagerTests: XCTestCase {
         let stream2 = makeStream(channel: "all-dead-channel", urlString: "invalid_url_scheme2://live")
         
         await manager.play(channel: channel, streams: [stream1, stream2])
-        
-        // Ждем 0.2 секунды, чтобы оба потока успели упасть
-        try? await Task.sleep(nanoseconds: 200_000_000)
         
         // Менеджер должен остановиться в состоянии failed для последнего потока
         let finalState = manager.state
@@ -123,8 +118,9 @@ final class PlayerStateManagerTests: XCTestCase {
         XCTAssertEqual(manager.state, .loading(stream: streamB))
         XCTAssertEqual(manager.currentChannel?.id, "channel-b")
         
-        // Ждем 0.3 секунды (больше таймаута)
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        await clock.waitUntilPending()
+        await clock.advance(by: .milliseconds(200))
+        await waitForFailedState()
         
         // Таймаут должен сработать только для канала Б (так как загрузка канала А была отменена)
         let finalState = manager.state
@@ -165,6 +161,23 @@ final class PlayerStateManagerTests: XCTestCase {
         manager.preferredBitrate = 1_500_000
         
         XCTAssertEqual(manager.avPlayer.currentItem?.preferredPeakBitRate, 1_500_000)
+    }
+
+    func test_publishedPauseStateFlipsWithoutReadingRate() async {
+        let channel = makeChannel(id: "pause", name: "Pause")
+        let stream = makeStream(channel: "pause", urlString: "http://example.com/live.m3u8")
+        XCTAssertTrue(manager.isPaused)
+        await manager.play(channel: channel, streams: [stream])
+        XCTAssertFalse(manager.isPaused)
+        manager.stop()
+        XCTAssertTrue(manager.isPaused)
+    }
+
+    private func waitForFailedState() async {
+        for _ in 0..<40 {
+            if case .failed = manager.state { return }
+            await Task.yield()
+        }
     }
 }
 

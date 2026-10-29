@@ -8,7 +8,7 @@ import ImageIO
 struct ChannelLogoView: View {
     let url: URL?
     let name: String
-    var maxPixelSize: CGFloat = 88 // 44pt @2x
+    var maxPixelSize: CGFloat = Layout.logoPixel
 
     @State private var image: NSImage?
 
@@ -18,23 +18,19 @@ struct ChannelLogoView: View {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 44, height: 44)
-                    .cornerRadius(6)
+                    .frame(width: Layout.logo, height: Layout.logo)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.m))
                     .accessibilityLabel("Логотип канала \(name)")
             } else {
                 ZStack {
-                    LinearGradient(
-                        colors: [Color.blue.opacity(0.7), Color.purple.opacity(0.7)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                    Palette.logoFallback(for: name)
                     Text(String(name.prefix(1)).uppercased())
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundStyle(Palette.hudInk)
                         .fontWeight(.bold)
                 }
-                .frame(width: 44, height: 44)
-                .cornerRadius(6)
+                .frame(width: Layout.logo, height: Layout.logo)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.m))
                 .accessibilityLabel("Логотип \(name) отсутствует")
             }
         }

@@ -28,7 +28,7 @@ struct IPTVApp: App {
         do {
             modelContainer = try ModelContainer(for: PersistedChannel.self)
         } catch {
-            print("Не удалось инициализировать SwiftData контейнер: \(error.localizedDescription)")
+            AppLog.persistence.error("SwiftData container failed: \(error.localizedDescription, privacy: .public)")
             persistenceWarning = "Избранное и история недоступны (ошибка хранилища)"
         }
         
@@ -51,7 +51,8 @@ struct IPTVApp: App {
                     window.isMovableByWindowBackground = false
                 })
         }
-        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
+        .windowStyle(.automatic)
         .commands {
             CommandGroup(after: .textEditing) {
                 Button("Поиск канала") {
