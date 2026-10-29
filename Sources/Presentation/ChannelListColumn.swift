@@ -67,6 +67,17 @@ struct ChannelListColumn: View {
                     onFavoriteToggle: { viewModel.toggleFavorite(channel) }
                 )
                 .tag(channel)
+                // List(selection:) does not fire onChange when the same row is clicked again.
+                // Explicit tap keeps selection and always asks VM to play/retry (A8 / S3).
+                .onTapGesture {
+                    let same = selectedChannel?.id == channel.id
+                    selectedChannel = channel
+                    // Same-row click: List won't change selection id, so retry here (A8 / S3).
+                    // New-row click: onChange(selectedChannel?.id) in MainSplitView plays once.
+                    if same {
+                        Task { await viewModel.selectChannel(channel) }
+                    }
+                }
             }
             if listWindow < rows.count {
                 Text("Загрузить ещё…")
