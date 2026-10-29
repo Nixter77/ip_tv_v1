@@ -37,6 +37,7 @@ public struct DetachedPlayerView: View {
         }
         .frame(minWidth: 640, minHeight: 360)
         .navigationTitle(playerManager.currentChannel?.name ?? "Проигрыватель")
+        // Fullscreen targets this window via PlayerSurface's WindowAccessor (A8 / S4), not NSApp.keyWindow.
         .background(WindowAccessor { window in
             window.isMovableByWindowBackground = true
         })
