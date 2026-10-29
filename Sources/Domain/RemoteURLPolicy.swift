@@ -9,7 +9,9 @@ import Darwin
 public enum RemoteResourceKind: Sendable, Equatable {
     /// Logos, Referer, decorative fetches: public http(s), no credentials.
     case remoteAsset
-    /// Playback: http(s) including loopback / RFC1918 (local IPTV).
+    /// Playback of a URL the user entered or imported locally: loopback / RFC1918 allowed,
+    /// link-local (169.254/16, fe80::/10) and cloud-metadata hosts still blocked.
+    /// Streams from a remote catalog must use `.remoteAsset`.
     case mediaStream
 }
 
@@ -158,8 +160,36 @@ public enum RemoteURLPolicy: Sendable {
             if isRestrictedHost(host) { return nil }
             return url
         case .mediaStream:
+            if isLinkLocalOrMetadataHost(host) { return nil }
             return url
         }
+    }
+
+    /// 169.254/16, fe80::/10 and cloud-metadata names — blocked for every kind.
+    static func isLinkLocalOrMetadataHost(_ host: String) -> Bool {
+        var normalized = host.lowercased()
+        if normalized.hasPrefix("[") && normalized.hasSuffix("]") {
+            normalized = String(normalized.dropFirst().dropLast())
+        }
+        if normalized.hasSuffix(".") { normalized = String(normalized.dropLast()) }
+        if normalized == "metadata.google.internal" || normalized == "metadata"
+            || normalized == "instance-data" || normalized.hasPrefix("instance-data.") {
+            return true
+        }
+        var addr6 = in6_addr()
+        if inet_pton(AF_INET6, normalized, &addr6) == 1 {
+            return withUnsafeBytes(of: &addr6) { raw -> Bool in
+                let b = raw.bindMemory(to: UInt8.self)
+                if b[0] == 0xFE && (b[1] & 0xC0) == 0x80 { return true }
+                // fd00:ec2::254 (AWS IMDS IPv6)
+                if b[0] == 0xFD && b[1] == 0x00 && b[2] == 0x0E && b[3] == 0xC2 { return true }
+                let mapped = (0..<10).allSatisfy { b[$0] == 0 } && b[10] == 0xFF && b[11] == 0xFF
+                return mapped && b[12] == 169 && b[13] == 254
+            }
+        }
+        if let ip = parseIPv4(normalized) { return ip >> 16 == 0xA9FE }
+        if let mapped = ipv4Mapped(from: normalized) { return mapped >> 16 == 0xA9FE }
+        return false
     }
 
     /// Dotted, abbreviated (`127.1`), or dword (`2130706433`) IPv4.

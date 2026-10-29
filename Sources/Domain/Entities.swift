@@ -64,6 +64,9 @@ public struct Stream: Equatable, Hashable, Sendable {
     public let quality: String?
     public let feed: String?
     public let title: String?
+    /// True only for URLs the user typed or imported locally. Catalog streams stay `false`
+    /// so a remote M3U cannot point AVPlayer at loopback / LAN (CWE-918).
+    public let allowsLocalNetwork: Bool
 
     public init(
         channel: String,
@@ -74,7 +77,8 @@ public struct Stream: Equatable, Hashable, Sendable {
         userAgent: String? = nil,
         quality: String? = nil,
         feed: String? = nil,
-        title: String? = nil
+        title: String? = nil,
+        allowsLocalNetwork: Bool = false
     ) {
         self.channel = channel
         self.urlString = urlString
@@ -85,10 +89,11 @@ public struct Stream: Equatable, Hashable, Sendable {
         self.quality = quality
         self.feed = feed
         self.title = title
+        self.allowsLocalNetwork = allowsLocalNetwork
     }
 
     public var url: URL? {
-        RemoteURLPolicy.validatedURL(from: urlString, kind: .mediaStream)
+        RemoteURLPolicy.validatedURL(from: urlString, kind: allowsLocalNetwork ? .mediaStream : .remoteAsset)
     }
 
     public var maskedUrlString: String {

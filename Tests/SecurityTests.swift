@@ -134,9 +134,23 @@ final class SecurityTests: XCTestCase {
         XCTAssertNil(makeStream("ftp://example.com/live.m3u8").url)
     }
 
-    func test_stream_url_allowsLANForLocalIPTV() {
-        XCTAssertNotNil(makeStream("http://192.168.1.10:8080/live.m3u8").url)
-        XCTAssertNotNil(makeStream("http://127.0.0.1:8888/stream").url)
+    func test_catalogStream_url_blocksLANAndMetadata() {
+        XCTAssertNil(makeStream("http://192.168.1.10:8080/live.m3u8").url)
+        XCTAssertNil(makeStream("http://127.0.0.1:8888/stream").url)
+        XCTAssertNil(makeStream("http://169.254.169.254/latest/meta-data/").url)
+        XCTAssertNil(makeStream("http://user:pass@cdn.example.com/live.m3u8").url)
+        XCTAssertNotNil(makeStream("https://cdn.example.com/live.m3u8").url)
+    }
+
+    func test_localStream_url_allowsLANButNotMetadata() {
+        func local(_ u: String) -> IPTVPlayer.Stream {
+            IPTVPlayer.Stream(channel: "c", urlString: u, status: nil, timeshift: nil, httpReferrer: nil, allowsLocalNetwork: true)
+        }
+        XCTAssertNotNil(local("http://192.168.1.10:8080/live.m3u8").url)
+        XCTAssertNotNil(local("http://127.0.0.1:8888/stream").url)
+        XCTAssertNil(local("http://169.254.169.254/latest/meta-data/").url)
+        XCTAssertNil(local("http://metadata.google.internal/computeMetadata/v1/").url)
+        XCTAssertNil(local("http://[fe80::1]/x").url)
     }
 
     func test_channel_safeLogoURL_blocksSSRFTargets() {

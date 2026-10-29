@@ -46,7 +46,7 @@ final class PlayerStateManagerTests: XCTestCase {
     func test_streamPlaybackTimeout() async {
         let channel = makeChannel(id: "timeout-channel", name: "Timeout Channel")
         // Используем несуществующий IP-адрес, чтобы запрос гарантированно завис
-        let stream = makeStream(channel: "timeout-channel", urlString: "http://10.255.255.1/stream.m3u8")
+        let stream = makeStream(channel: "timeout-channel", urlString: "http://192.0.2.1/stream.m3u8")
         
         await manager.play(channel: channel, streams: [stream])
         
@@ -74,7 +74,7 @@ final class PlayerStateManagerTests: XCTestCase {
         let channel = makeChannel(id: "fallback-channel", name: "Fallback Channel")
         // Первый поток мертв (мгновенно падает из-за некорректной схемы), второй поток зависает (таймаут)
         let stream1 = makeStream(channel: "fallback-channel", urlString: "invalid_url_scheme://live")
-        let stream2 = makeStream(channel: "fallback-channel", urlString: "http://10.255.255.1/stream.m3u8")
+        let stream2 = makeStream(channel: "fallback-channel", urlString: "http://192.0.2.1/stream.m3u8")
         
         await localManager.play(channel: channel, streams: [stream1, stream2])
         
@@ -103,10 +103,10 @@ final class PlayerStateManagerTests: XCTestCase {
     /// Тест: быстрое переключение каналов (zapping) отменяет предыдущую загрузку
     func test_rapidChannelZappingCancellation() async {
         let channelA = makeChannel(id: "channel-a", name: "Channel A")
-        let streamA = makeStream(channel: "channel-a", urlString: "http://10.255.255.1/streamA.m3u8")
+        let streamA = makeStream(channel: "channel-a", urlString: "http://192.0.2.1/streamA.m3u8")
         
         let channelB = makeChannel(id: "channel-b", name: "Channel B")
-        let streamB = makeStream(channel: "channel-b", urlString: "http://10.255.255.1/streamB.m3u8")
+        let streamB = makeStream(channel: "channel-b", urlString: "http://192.0.2.1/streamB.m3u8")
         
         // Запускаем канал А
         await manager.play(channel: channelA, streams: [streamA])
@@ -134,7 +134,7 @@ final class PlayerStateManagerTests: XCTestCase {
     /// Тест: остановка воспроизведения освобождает ресурсы
     func test_playerReleasesResourcesOnStop() async {
         let channel = makeChannel(id: "stop-channel", name: "Stop Channel")
-        let stream = makeStream(channel: "stop-channel", urlString: "http://10.255.255.1/stream.m3u8")
+        let stream = makeStream(channel: "stop-channel", urlString: "http://192.0.2.1/stream.m3u8")
         
         await manager.play(channel: channel, streams: [stream])
         XCTAssertEqual(manager.state, .loading(stream: stream))

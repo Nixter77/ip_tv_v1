@@ -9,6 +9,8 @@ public enum PlaybackRequestHeaders {
     /// Sanitized Referer and User-Agent for `AVURLAssetHTTPHeaderFieldsKey`.
     public static func httpHeaderFields(for stream: Stream) -> [String: String] {
         var fields: [String: String] = [:]
+        // Never forward catalog Referer/UA to a loopback / LAN target.
+        if let host = stream.url?.host, RemoteURLPolicy.isRestrictedHost(host) { return fields }
         if let referrer = RemoteURLPolicy.sanitizedHTTPHeaderValue(stream.httpReferrer),
            let referrerURL = RemoteURLPolicy.validatedURL(from: referrer, kind: .remoteAsset) {
             fields["Referer"] = referrerURL.absoluteString
