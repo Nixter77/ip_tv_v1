@@ -55,6 +55,7 @@ public struct QuickTimeHUDPanel: View {
                     Image(systemName: isPaused ? "play.fill" : "pause.fill")
                         .font(.title2)
                         .frame(width: Layout.playControl, height: Layout.playControl)
+                        .id(isPaused) // force glyph swap from published isPaused (A3 / S1)
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
