@@ -24,7 +24,7 @@ public enum PlaybackRequestHeaders {
 
 /// AVFoundation adapter + playback policy (fallback, timeout, stall, retry)
 @MainActor
-public final class PlayerStateManager: NSObject, StreamPlayer {
+public final class PlayerStateManager: NSObject, ObservableObject, StreamPlayer {
     @Published public private(set) var state: PlayerState = .idle
     @Published public private(set) var currentChannel: Channel?
     /// Published from time-control observation so SwiftUI does not read `AVPlayer.rate`.

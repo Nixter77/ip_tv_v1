@@ -10,8 +10,14 @@ public final class PlaybackController: ObservableObject {
     @Published public var isDetached = false
     @Published public private(set) var nowPlayingTitle: String?
 
+    private var playerBag: AnyCancellable?
+
     public init(player: PlayerStateManager) {
         self.player = player
+        // Forward pause/state so parents observing PlaybackController also refresh (A3).
+        playerBag = player.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
     }
 
     public func play(channel: Channel, streams: [Stream]) async {

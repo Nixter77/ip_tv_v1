@@ -6,12 +6,12 @@ import AVFoundation
 // MARK: - QuickTimeVideoContainer
 
 /// Безрамочный контейнер: видео-холст + авто-скрывающийся HUD поверх.
+/// Observe PlayerStateManager so HUD glyph tracks published `isPaused` (A3 / S1).
 public struct QuickTimeVideoContainer: View {
-    let player: AVPlayer
-    let playerState: PlayerState
+    @ObservedObject var playerManager: PlayerStateManager
+
     let channelName: String?
     let isFavorite: Bool
-    let isPaused: Bool
 
     var onTogglePlayPause: (() -> Void)?
     var onToggleFullscreen: (() -> Void)?
@@ -23,11 +23,9 @@ public struct QuickTimeVideoContainer: View {
     @State private var hudVisible: Bool = true
 
     public init(
-        player: AVPlayer,
-        playerState: PlayerState,
+        playerManager: PlayerStateManager,
         channelName: String? = nil,
         isFavorite: Bool = false,
-        isPaused: Bool = true,
         onTogglePlayPause: (() -> Void)? = nil,
         onToggleFullscreen: (() -> Void)? = nil,
         onDetachPlayer: (() -> Void)? = nil,
@@ -35,11 +33,9 @@ public struct QuickTimeVideoContainer: View {
         onRetry: (() -> Void)? = nil,
         preferredBitrate: Binding<Double>? = nil
     ) {
-        self.player = player
-        self.playerState = playerState
+        self.playerManager = playerManager
         self.channelName = channelName
         self.isFavorite = isFavorite
-        self.isPaused = isPaused
         self.onTogglePlayPause = onTogglePlayPause
         self.onToggleFullscreen = onToggleFullscreen
         self.onDetachPlayer = onDetachPlayer
@@ -50,24 +46,23 @@ public struct QuickTimeVideoContainer: View {
 
     public var body: some View {
         ZStack {
-            VideoPlayerView(player: player)
+            VideoPlayerView(player: playerManager.avPlayer)
 
-            // Буферизация / ошибки (+ retry)
-            PlayerHUDOverlay(state: playerState, onRetry: onRetry)
+            PlayerHUDOverlay(state: playerManager.state, onRetry: onRetry)
 
-            // QuickTime HUD при воспроизведении
-            if case .playing = playerState {
+            if case .playing = playerManager.state {
                 QuickTimeHUDPanel(
-                    player: player,
+                    player: playerManager.avPlayer,
                     channelName: channelName,
                     isFavorite: isFavorite,
-                    isPaused: isPaused,
+                    isPaused: playerManager.isPaused,
                     onTogglePlayPause: onTogglePlayPause,
                     onToggleFullscreen: onToggleFullscreen,
                     onDetachPlayer: onDetachPlayer,
                     onToggleFavorite: onToggleFavorite,
                     preferredBitrate: preferredBitrate
                 )
+                .id(playerManager.isPaused) // rebuild glyph when published pause flips
                 .autoHideHUD(isVisible: $hudVisible)
                 .frame(maxHeight: .infinity, alignment: .bottom)
             }

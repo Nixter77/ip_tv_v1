@@ -52,11 +52,9 @@ struct PlayerSurface: View {
 
     var body: some View {
         QuickTimeVideoContainer(
-            player: player.avPlayer,
-            playerState: player.state,
+            playerManager: player,
             channelName: channelName,
             isFavorite: isFavorite,
-            isPaused: player.isPaused,
             onTogglePlayPause: { player.togglePause() },
             onToggleFullscreen: { hostWindow?.toggleFullScreen(nil) },
             onDetachPlayer: showsDetach ? onDetach : nil,
