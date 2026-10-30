@@ -10,6 +10,8 @@ public final class AppCommandCenter: ObservableObject {
     @Published public private(set) var focusSearchGeneration: UInt = 0
     /// Bumps when ⌘R / menu requests playlist reload
     @Published public private(set) var reloadGeneration: UInt = 0
+    /// Bumps when Space / menu requests play-pause (A3)
+    @Published public private(set) var pauseGeneration: UInt = 0
 
     public init() {}
 
@@ -19,6 +21,10 @@ public final class AppCommandCenter: ObservableObject {
 
     public func requestReload() {
         reloadGeneration &+= 1
+    }
+
+    public func requestTogglePause() {
+        pauseGeneration &+= 1
     }
 }
 #endif

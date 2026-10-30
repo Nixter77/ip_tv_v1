@@ -68,11 +68,18 @@ public struct MainSplitView: View {
         .onChange(of: commands.reloadGeneration) { _, _ in
             Task { await viewModel.reloadPlaylist() }
         }
+        .onChange(of: commands.pauseGeneration) { _, _ in
+            // Menu ⌨ Space (reliable when List has focus). Skip while search field is editing.
+            guard !isSearchFieldActive else { return }
+            viewModel.togglePause()
+        }
         .onKeyPress(.space) {
+            // Fallback when the split view itself is first responder.
             if isSearchFieldActive { return .ignored }
             viewModel.togglePause()
             return .handled
         }
+        .focusable()
         .onChange(of: selectedChannel?.id) { _, newID in
             guard let newID, let channel = selectedChannel, channel.id == newID else { return }
             Task { await viewModel.selectChannel(channel) }
