@@ -69,21 +69,59 @@ public struct MainSplitView: View {
             Task { await viewModel.reloadPlaylist() }
         }
         .onChange(of: commands.pauseGeneration) { _, _ in
-            // Menu ⌨ Space (reliable when List has focus). Skip while search field is editing.
-            guard !isSearchFieldActive else { return }
+            // Menu "Пауза / Play" (no shortcut; Space handled by SpaceKeyMonitor).
             viewModel.togglePause()
         }
-        .onKeyPress(.space) {
-            // Fallback when the split view itself is first responder.
-            if isSearchFieldActive { return .ignored }
+        .modifier(SpaceKeyMonitor(isActive: { viewModel.nowPlayingTitle != nil }) {
             viewModel.togglePause()
-            return .handled
-        }
-        .focusable()
+        })
         .onChange(of: selectedChannel?.id) { _, newID in
             guard let newID, let channel = selectedChannel, channel.id == newID else { return }
             Task { await viewModel.selectChannel(channel) }
         }
+    }
+}
+
+/// S1d: AppKit-level Space routing. SwiftUI .onKeyPress and a modifier-less menu
+/// key equivalent both lose to the real first responder (NSTableView of the List,
+/// focused HUD buttons), so Space never reached togglePause. A local keyDown monitor
+/// sees the event before any responder; it passes through only when an editable
+/// text view (search field editor) is first responder.
+struct SpaceKeyMonitor: ViewModifier {
+    let isActive: @MainActor () -> Bool
+    let action: @MainActor () -> Void
+    @State private var monitor: Any?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                guard monitor == nil else { return }
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    guard event.keyCode == 49 else { return event }
+                    let keyWindowResponder = event.window?.firstResponder
+                    let editingText = (keyWindowResponder as? NSTextView)?.isEditable ?? false
+                    let mods = event.modifierFlags.intersection([.command, .control, .option, .function])
+                    let isRepeat = event.isARepeat
+                    let consumed = MainActor.assumeIsolated {
+                        SpaceKeyMonitor.shouldConsume(
+                            isRepeat: isRepeat, hasModifiers: !mods.isEmpty,
+                            editingText: editingText, isActive: isActive, action: action)
+                    }
+                    return consumed ? nil : event
+                }
+            }
+            .onDisappear {
+                if let monitor { NSEvent.removeMonitor(monitor) }
+                monitor = nil
+            }
+    }
+
+    @MainActor
+    static func shouldConsume(isRepeat: Bool, hasModifiers: Bool, editingText: Bool,
+                              isActive: () -> Bool, action: () -> Void) -> Bool {
+        guard !isRepeat, !hasModifiers, !editingText, isActive() else { return false }
+        action()
+        return true
     }
 }
 #endif

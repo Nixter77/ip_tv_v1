@@ -65,11 +65,11 @@ struct IPTVApp: App {
                 }
                 .keyboardShortcut("r", modifiers: .command)
 
-                // Space must be a menu shortcut: List/SplitView focus eats .onKeyPress(.space).
+                // Space is routed by SpaceKeyMonitor (MainSplitView); a modifier-less
+                // menu key equivalent would also swallow Space typed in search.
                 Button("Пауза / Play") {
                     commands.requestTogglePause()
                 }
-                .keyboardShortcut(.space, modifiers: [])
             }
         }
         
