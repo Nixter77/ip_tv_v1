@@ -12,15 +12,26 @@ public struct WindowAccessor: NSViewRepresentable {
     }
 
     public func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            if let window = view.window {
-                callback(window)
-            }
-        }
+        let view = WindowTrackingView()
+        view.onWindow = callback
         return view
     }
 
-    public func updateNSView(_ nsView: NSView, context: Context) {}
+    public func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? WindowTrackingView)?.onWindow = callback
+    }
+}
+
+/// AC-6b: reports the window when the view is actually attached. The old
+/// makeNSView + async read often ran before attachment, so callers got nil.
+final class WindowTrackingView: NSView {
+    var onWindow: ((NSWindow) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        let cb = onWindow
+        DispatchQueue.main.async { cb?(window) }
+    }
 }
 #endif

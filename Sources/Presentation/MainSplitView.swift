@@ -14,11 +14,18 @@ public struct MainSplitView: View {
     @State private var hostWindow: NSWindow?
     @State private var isFullScreen = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var savedVisibility: NavigationSplitViewVisibility = .all
 
     public init(viewModel: AppViewModel, commands: AppCommandCenter) {
         self.viewModel = viewModel
         self.commands = commands
+    }
+
+    /// Notification window is ours: the tracked host, or (if not yet tracked) the
+    /// only window that is not a detached player/panel.
+    private func isMainWindow(_ w: NSWindow?) -> Bool {
+        guard let w else { return false }
+        if let hostWindow { return w === hostWindow }
+        return !(w is NSPanel)
     }
 
     public var body: some View {
@@ -39,38 +46,59 @@ public struct MainSplitView: View {
                 .padding(.horizontal, Spacing.l)
                 .padding(.vertical, Spacing.s)
             }
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                SidebarColumn(viewModel: viewModel)
-                    .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
-            } content: {
-                ChannelListColumn(
-                    viewModel: viewModel,
-                    commands: commands,
-                    selectedChannel: $selectedChannel,
-                    isSearchFieldActive: $isSearchFieldActive
-                )
-                .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 450)
-            } detail: {
+            if isFullScreen {
+                // AC-6b: player-only view swap in FS; NavigationSplitView on macOS
+                // does not reliably collapse to .detailOnly.
                 PlayerDetailColumn(
                     viewModel: viewModel,
                     playerManager: viewModel.playerManager,
                     openWindow: openWindow,
                     dismissWindow: dismissWindow
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+            } else {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    SidebarColumn(viewModel: viewModel)
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
+                } content: {
+                    ChannelListColumn(
+                        viewModel: viewModel,
+                        commands: commands,
+                        selectedChannel: $selectedChannel,
+                        isSearchFieldActive: $isSearchFieldActive
+                    )
+                    .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 450)
+                } detail: {
+                    PlayerDetailColumn(
+                        viewModel: viewModel,
+                        playerManager: viewModel.playerManager,
+                        openWindow: openWindow,
+                        dismissWindow: dismissWindow
+                    )
+                }
             }
         }
         .toolbar(isFullScreen ? .hidden : .automatic, for: .windowToolbar)
-        .background(WindowAccessor { hostWindow = $0 })
+        .background(WindowAccessor { window in
+            hostWindow = window
+            isFullScreen = window.styleMask.contains(.fullScreen)
+        })
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { note in
-            guard let w = note.object as? NSWindow, w === hostWindow else { return }
-            savedVisibility = columnVisibility
+            guard isMainWindow(note.object as? NSWindow) else { return }
             isFullScreen = true
-            columnVisibility = .detailOnly
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { note in
+            guard isMainWindow(note.object as? NSWindow) else { return }
+            isFullScreen = true
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification)) { note in
-            guard let w = note.object as? NSWindow, w === hostWindow else { return }
+            guard isMainWindow(note.object as? NSWindow) else { return }
             isFullScreen = false
-            columnVisibility = savedVisibility == .detailOnly ? .all : savedVisibility
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
+            guard isMainWindow(note.object as? NSWindow) else { return }
+            isFullScreen = false
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
