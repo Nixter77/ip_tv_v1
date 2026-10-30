@@ -6,6 +6,7 @@ import IPTVPlayer
 
 @main
 struct IPTVApp: App {
+    @NSApplicationDelegateAdaptor(IPTVAppDelegate.self) private var appDelegate
     @StateObject private var viewModel: AppViewModel
     @StateObject private var commands: AppCommandCenter
     

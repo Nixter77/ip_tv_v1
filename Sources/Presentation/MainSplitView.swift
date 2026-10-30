@@ -78,6 +78,13 @@ public struct MainSplitView: View {
         .onChange(of: selectedChannel?.id) { _, newID in
             guard let newID, let channel = selectedChannel, channel.id == newID else { return }
             Task { await viewModel.selectChannel(channel) }
+            // S1e: user started playback in this window — make sure it is key so
+            // SpaceKeyMonitor receives Space (user-initiated, not background stealing).
+            if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
+            if let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeKey }),
+               !window.isKeyWindow {
+                window.makeKeyAndOrderFront(nil)
+            }
         }
     }
 }
