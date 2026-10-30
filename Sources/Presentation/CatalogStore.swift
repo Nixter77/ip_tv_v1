@@ -176,8 +176,11 @@ public final class CatalogStore: ObservableObject {
             await publishCounts()
             return
         }
+        // AC-4: Favorites tab always lists every saved favorite. A lingering search
+        // query (from the All tab) used to hide older favorites, so they looked wiped.
+        let effectiveQuery = selectedTab == .favorites ? "" : searchQuery
         let result = await filterEngine.filter(
-            query: searchQuery,
+            query: effectiveQuery,
             category: categoryFilter,
             country: countryFilter,
             language: languageFilter,
