@@ -10,6 +10,11 @@ public struct MainSplitView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var selectedChannel: Channel?
     @State private var isSearchFieldActive = false
+    // S4/AC-6: content-only fullscreen — hide sidebar/list/toolbar while host window is FS.
+    @State private var hostWindow: NSWindow?
+    @State private var isFullScreen = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var savedVisibility: NavigationSplitViewVisibility = .all
 
     public init(viewModel: AppViewModel, commands: AppCommandCenter) {
         self.viewModel = viewModel
@@ -18,12 +23,12 @@ public struct MainSplitView: View {
 
     public var body: some View {
         VStack(spacing: Spacing.xxs) {
-            if let banner = viewModel.statusBanner {
+            if !isFullScreen, let banner = viewModel.statusBanner {
                 StatusBannerView(message: banner, severity: viewModel.statusSeverity) {
                     viewModel.dismissStatusBanner()
                 }
             }
-            if viewModel.isRefreshing {
+            if !isFullScreen && viewModel.isRefreshing {
                 HStack(spacing: Spacing.m) {
                     ProgressView().controlSize(.small)
                     Text("Обновление плейлиста…")
@@ -34,7 +39,7 @@ public struct MainSplitView: View {
                 .padding(.horizontal, Spacing.l)
                 .padding(.vertical, Spacing.s)
             }
-            NavigationSplitView {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarColumn(viewModel: viewModel)
                     .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
             } content: {
@@ -53,6 +58,19 @@ public struct MainSplitView: View {
                     dismissWindow: dismissWindow
                 )
             }
+        }
+        .toolbar(isFullScreen ? .hidden : .automatic, for: .windowToolbar)
+        .background(WindowAccessor { hostWindow = $0 })
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { note in
+            guard let w = note.object as? NSWindow, w === hostWindow else { return }
+            savedVisibility = columnVisibility
+            isFullScreen = true
+            columnVisibility = .detailOnly
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification)) { note in
+            guard let w = note.object as? NSWindow, w === hostWindow else { return }
+            isFullScreen = false
+            columnVisibility = savedVisibility == .detailOnly ? .all : savedVisibility
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
